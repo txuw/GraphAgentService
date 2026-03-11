@@ -1,12 +1,18 @@
 # OverMindAgent
 
-使用 `uv` 管理依赖与运行环境的 FastAPI 项目，采用 `src/` 目录结构、`.env` 配置加载与 k3s 友好的部署清单。
+使用 `uv` 管理依赖与运行环境的 FastAPI + LangGraph 项目，采用 `src/` 目录结构、`.env` 配置加载，以及适合继续扩展 Agent/Graph 的脚手架分层。
 
 ## 项目结构
 
 ```text
 .
-├── src/overmindagent    # 应用源码
+├── src/overmindagent/api      # FastAPI 路由与依赖
+├── src/overmindagent/common   # 配置与共享基础设施
+├── src/overmindagent/graphs   # LangGraph builder / registry / state
+├── src/overmindagent/llm      # LLM 工厂与 provider 抽象
+├── src/overmindagent/nodes    # Graph 节点
+├── src/overmindagent/schemas  # Pydantic 输入输出模型
+├── src/overmindagent/services # Graph 编排服务
 ├── tests                # 测试
 └── deploy/k3s           # k3s 部署清单
 ```
@@ -35,6 +41,23 @@ uv run uvicorn overmindagent.main:app --reload
 
 ```bash
 uv run overmindagent
+```
+
+## LangGraph 示例
+
+当前内置一个 `text-analysis` 示例 graph，用于演示：
+
+- `LLM` 配置与模型工厂拆分
+- `Graph`、`Node`、`State` 分层
+- 基于 `Pydantic` 的结构化输出
+- FastAPI 内嵌调用入口
+
+调用示例：
+
+```bash
+curl -X POST "http://127.0.0.1:8000/api/graphs/text-analysis/invoke" \
+  -H "Content-Type: application/json" \
+  -d '{"text":"LangGraph is useful for workflow orchestration.","session_id":"demo-1"}'
 ```
 
 ## 测试
@@ -72,7 +95,7 @@ cp deploy/k3s/.env.example deploy/k3s/.env
 kubectl apply -k deploy/k3s
 ```
 
-部署清单会通过 `ConfigMap` 注入环境变量，并使用 `/healthz` 作为容器探针。当前 k3s 清单默认要求 `OVERMIND_PORT=8000`，这样可以和 Service 与探针保持一致。
+部署清单会通过 `ConfigMap` 注入环境变量，并使用 `/health` 作为容器探针。当前 k3s 清单默认要求 `OVERMIND_PORT=8000`，这样可以和 Service 与探针保持一致。
 
 ## CI/CD
 
