@@ -15,8 +15,8 @@ def create_app() -> FastAPI:
     async def say_hello(name: str) -> dict[str, str]:
         return {"message": f"Hello {name}"}
 
-    @app.get("/healthz")
-    async def healthz() -> dict[str, str]:
+    @app.get("/health")
+    async def health() -> dict[str, str]:
         return {"status": "ok", "environment": settings.app_env}
 
     return app
