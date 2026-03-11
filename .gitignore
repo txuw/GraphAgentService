@@ -24,6 +24,9 @@ env/
 # Local environment files
 .env
 .env.*
+!.env.example
+!deploy/k3s/.env.example
+deploy/k3s/.env
 
 # Build artifacts
 build/

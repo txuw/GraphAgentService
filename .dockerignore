@@ -1,0 +1,17 @@
+.git
+.github
+.idea
+.venv
+__pycache__
+.pytest_cache
+.mypy_cache
+.ruff_cache
+.coverage
+.coverage.*
+htmlcov
+tests
+test_main.http
+.DS_Store
+.env
+.env.*
+deploy/k3s/.env

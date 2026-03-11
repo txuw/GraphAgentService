@@ -1,0 +1,150 @@
+name: Python CI and Update Deployment Config
+
+on:
+  push:
+    branches: ["master", "main"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  PYTHON_VERSION: "3.11"
+  UV_VERSION: "0.8.18"
+  APP_NAME: overmindagent
+  ACR_DOMAIN: ${{ vars.ACR_DOMAIN }}
+  ACR_ZONE: ${{ vars.ACR_ZONE }}
+  DEPLOY_REPO: ${{ vars.DEPLOY_REPO }}
+  DEPLOY_FILE: ${{ vars.DEPLOY_FILE }}
+
+jobs:
+  ci:
+    name: Run tests
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout application code
+        uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v7
+        with:
+          version: ${{ env.UV_VERSION }}
+          enable-cache: true
+
+      - name: Install dependencies
+        run: uv sync --frozen --all-groups
+
+      - name: Run tests
+        run: uv run pytest
+
+  build-and-push:
+    name: Build and push Docker image
+    runs-on: ubuntu-latest
+    needs: ci
+    outputs:
+      image_tag: ${{ steps.image_tag.outputs.image_tag }}
+
+    steps:
+      - name: Validate registry configuration
+        env:
+          ACR_USERNAME: ${{ secrets.ACR_USERNAME }}
+          ACR_PASSWORD: ${{ secrets.ACR_PASSWORD }}
+        run: |
+          missing=0
+
+          for key in ACR_DOMAIN ACR_ZONE; do
+            if [ -z "${!key}" ]; then
+              echo "::error::Missing repository variable ${key}"
+              missing=1
+            fi
+          done
+
+          for key in ACR_USERNAME ACR_PASSWORD; do
+            if [ -z "${!key}" ]; then
+              echo "::error::Missing repository secret ${key}"
+              missing=1
+            fi
+          done
+
+          [ "$missing" -eq 0 ]
+
+      - name: Checkout application code
+        uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      - name: Set Image Tag
+        id: image_tag
+        run: echo "image_tag=$(git rev-parse --short HEAD)" >> "$GITHUB_OUTPUT"
+
+      - name: Log in to Docker ACR
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.ACR_DOMAIN }}
+          username: ${{ secrets.ACR_USERNAME }}
+          password: ${{ secrets.ACR_PASSWORD }}
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build and push Docker image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ./Dockerfile
+          push: true
+          platforms: linux/amd64
+          tags: ${{ env.ACR_DOMAIN }}/${{ env.ACR_ZONE }}/${{ env.APP_NAME }}:${{ steps.image_tag.outputs.image_tag }}
+
+  update-deploy-config:
+    name: Update GitOps repository
+    runs-on: ubuntu-latest
+    needs: build-and-push
+
+    steps:
+      - name: Validate deployment configuration
+        env:
+          GIT_PAT: ${{ secrets.GIT_PAT }}
+        run: |
+          missing=0
+
+          for key in DEPLOY_REPO DEPLOY_FILE; do
+            if [ -z "${!key}" ]; then
+              echo "::error::Missing repository variable ${key}"
+              missing=1
+            fi
+          done
+
+          if [ -z "$GIT_PAT" ]; then
+            echo "::error::Missing repository secret GIT_PAT"
+            missing=1
+          fi
+
+          [ "$missing" -eq 0 ]
+
+      - name: Update Kubernetes deployment file in Git
+        run: |
+          git clone "https://x-access-token:${{ secrets.GIT_PAT }}@github.com/${{ env.DEPLOY_REPO }}.git" deploy-config
+          cd deploy-config
+
+          git config user.name "GitHub Actions Bot"
+          git config user.email "actions@github.com"
+
+          sed -i "s|image: ${{ env.ACR_DOMAIN }}/${{ env.ACR_ZONE }}/${{ env.APP_NAME }}:.*|image: ${{ env.ACR_DOMAIN }}/${{ env.ACR_ZONE }}/${{ env.APP_NAME }}:${{ needs.build-and-push.outputs.image_tag }}|g" "${{ env.DEPLOY_FILE }}"
+
+          git add "${{ env.DEPLOY_FILE }}"
+
+          if ! git diff --staged --quiet; then
+            git commit -m "Update image for ${{ env.APP_NAME }} to tag ${{ needs.build-and-push.outputs.image_tag }}"
+            git push
+          else
+            echo "No changes to commit."
+          fi

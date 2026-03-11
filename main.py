@@ -1,13 +1,8 @@
-from fastapi import FastAPI
+from overmindagent.__main__ import main
+from overmindagent.main import app
 
-app = FastAPI()
-
-
-@app.get("/")
-async def root():
-    return {"message": "Hello World"}
+__all__ = ["app"]
 
 
-@app.get("/hello/{name}")
-async def say_hello(name: str):
-    return {"message": f"Hello {name}"}
+if __name__ == "__main__":
+    main()
