@@ -11,7 +11,7 @@ permissions:
 env:
   PYTHON_VERSION: "3.11"
   UV_VERSION: "0.8.18"
-  APP_NAME: overmindagent
+  APP_NAME: over-mind-agent
   ACR_DOMAIN: registry.cn-hangzhou.aliyuncs.com
   ACR_ZONE: txuw
   DEPLOY_REPO: txuw/k3s-apps-config
