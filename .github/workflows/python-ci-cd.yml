@@ -12,10 +12,10 @@ env:
   PYTHON_VERSION: "3.11"
   UV_VERSION: "0.8.18"
   APP_NAME: overmindagent
-  ACR_DOMAIN: ${{ vars.ACR_DOMAIN }}
-  ACR_ZONE: ${{ vars.ACR_ZONE }}
-  DEPLOY_REPO: ${{ vars.DEPLOY_REPO }}
-  DEPLOY_FILE: ${{ vars.DEPLOY_FILE }}
+  ACR_DOMAIN: registry.cn-hangzhou.aliyuncs.com
+  ACR_ZONE: txuw
+  DEPLOY_REPO: txuw/k3s-apps-config
+  DEPLOY_FILE: over-mind-agent-deployment.yaml
 
 jobs:
   ci:
