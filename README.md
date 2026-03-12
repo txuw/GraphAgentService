@@ -66,6 +66,11 @@ curl -X POST "http://127.0.0.1:8000/api/graphs/text-analysis/invoke" \
 uv run pytest
 ```
 
+## 文档
+
+- 脚手架说明：`doc/wiki/scaffold.md`
+- 新手上手：`doc/tutorial/getting-started.md`
+
 ## Docker
 
 构建镜像：

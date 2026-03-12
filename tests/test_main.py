@@ -35,7 +35,7 @@ def test_graph_invoke_endpoint_returns_structured_response() -> None:
     original_service = app.state.graph_service
 
     class FakeGraphService:
-        def invoke(self, graph_name: str, payload):
+        async def invoke(self, graph_name: str, payload):
             return GraphInvocationResult(
                 graph_name=graph_name,
                 session_id=payload.session_id or "session-1",
@@ -51,6 +51,9 @@ def test_graph_invoke_endpoint_returns_structured_response() -> None:
                     ),
                 ),
             )
+
+        async def stream(self, graph_name: str, payload):
+            yield "event: completed\ndata: {\"session_id\": \"session-1\"}\n\n"
 
     app.state.graph_service = FakeGraphService()
     try:
@@ -71,7 +74,10 @@ def test_graph_invoke_endpoint_returns_404_for_unknown_graph() -> None:
     original_service = app.state.graph_service
 
     class MissingGraphService:
-        def invoke(self, graph_name: str, payload):
+        async def invoke(self, graph_name: str, payload):
+            raise GraphNotFoundError(graph_name)
+
+        async def stream(self, graph_name: str, payload):
             raise GraphNotFoundError(graph_name)
 
     app.state.graph_service = MissingGraphService()
@@ -84,3 +90,42 @@ def test_graph_invoke_endpoint_returns_404_for_unknown_graph() -> None:
         app.state.graph_service = original_service
 
     assert response.status_code == 404
+
+
+def test_graph_stream_endpoint_returns_sse_payload() -> None:
+    original_service = app.state.graph_service
+
+    class FakeGraphService:
+        async def invoke(self, graph_name: str, payload):
+            return GraphInvocationResult(
+                graph_name=graph_name,
+                session_id=payload.session_id or "session-1",
+                output=TextAnalysisOutput(
+                    normalized_text="hello world",
+                    analysis=StructuredTextAnalysis(
+                        language="en",
+                        summary="Greeting",
+                        intent="salutation",
+                        sentiment="positive",
+                        categories=["greeting"],
+                        confidence=0.99,
+                    ),
+                ),
+            )
+
+        async def stream(self, graph_name: str, payload):
+            yield "event: session\ndata: {\"graph_name\":\"text-analysis\",\"session_id\":\"session-1\"}\n\n"
+            yield "event: completed\ndata: {\"session_id\":\"session-1\"}\n\n"
+
+    app.state.graph_service = FakeGraphService()
+    try:
+        response = client.post(
+            "/api/graphs/text-analysis/stream",
+            json={"text": "hello world", "session_id": "session-1"},
+        )
+    finally:
+        app.state.graph_service = original_service
+
+    assert response.status_code == 200
+    assert "text/event-stream" in response.headers["content-type"]
+    assert "event: session" in response.text

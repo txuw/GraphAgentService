@@ -1,42 +1,33 @@
 from __future__ import annotations
 
-from typing import TypeVar
-
-from langchain_openai import ChatOpenAI
-from pydantic import BaseModel
-
 from overmindagent.common.config import LLMSettings
 
-StructuredSchema = TypeVar("StructuredSchema", bound=BaseModel)
+from .adapters import (
+    OpenAIChatAdapter,
+    OpenAIResponsesAdapter,
+    ProviderAdapter,
+    UnsupportedLLMConfigurationError,
+)
+from .session import LLMSession
+from .tools import ToolRegistry
 
 
-class MissingLLMConfigurationError(RuntimeError):
-    pass
-
-
-class LLMModelFactory:
+class LLMSessionFactory:
     def __init__(self, settings: LLMSettings) -> None:
         self._settings = settings
+        self._adapters: dict[tuple[str, str], ProviderAdapter] = {}
+        self.register(OpenAIResponsesAdapter())
+        self.register(OpenAIChatAdapter())
 
-    def create_chat_model(self) -> ChatOpenAI:
-        api_key = self._settings.api_key.get_secret_value() if self._settings.api_key else None
-        if not api_key:
-            raise MissingLLMConfigurationError(
-                "Missing OVERMIND_LLM_API_KEY for LangGraph model invocation."
+    def register(self, adapter: ProviderAdapter) -> None:
+        # Provider and protocol together define a stable external session shape.
+        self._adapters[(adapter.provider_name, adapter.protocol_name)] = adapter
+
+    def create(self, tool_registry: ToolRegistry | None = None) -> LLMSession:
+        adapter = self._adapters.get((self._settings.provider, self._settings.protocol))
+        if adapter is None:
+            raise UnsupportedLLMConfigurationError(
+                f"Unsupported provider/protocol combination: "
+                f"{self._settings.provider}/{self._settings.protocol}"
             )
-
-        kwargs: dict[str, object] = {
-            "api_key": api_key,
-            "model": self._settings.model,
-            "temperature": self._settings.temperature,
-            "timeout": self._settings.timeout,
-        }
-        if self._settings.base_url:
-            kwargs["base_url"] = self._settings.base_url
-        if self._settings.max_tokens is not None:
-            kwargs["max_tokens"] = self._settings.max_tokens
-
-        return ChatOpenAI(**kwargs)
-
-    def create_structured_model(self, schema: type[StructuredSchema]):
-        return self.create_chat_model().with_structured_output(schema)
+        return adapter.build_session(settings=self._settings, tool_registry=tool_registry)

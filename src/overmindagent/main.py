@@ -3,13 +3,13 @@ from fastapi import FastAPI
 from overmindagent.api import router as api_router
 from overmindagent.common import create_checkpoint_provider, get_settings
 from overmindagent.graphs import create_graph_registry
-from overmindagent.llm import LLMModelFactory
+from overmindagent.llm import LLMSessionFactory
 from overmindagent.services import GraphService
 
 
 def create_app() -> FastAPI:
     settings = get_settings()
-    llm_factory = LLMModelFactory(settings.llm)
+    llm_factory = LLMSessionFactory(settings.llm)
     checkpoint_provider = create_checkpoint_provider(settings.graph)
     graph_registry = create_graph_registry(
         llm_factory=llm_factory,

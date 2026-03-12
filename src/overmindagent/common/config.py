@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from functools import lru_cache
-from typing import Literal
+from typing import Any, Literal
 
 from pydantic import BaseModel, Field, SecretStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -18,11 +18,17 @@ class AppSettings(BaseModel):
 
 class LLMSettings(BaseModel):
     api_key: SecretStr | None = None
+    provider: str = "openai"
+    protocol: Literal["responses", "chat"] = "responses"
     base_url: str | None = None
     model: str = "gpt-4o-mini"
     temperature: float = 0.0
     timeout: float = 60.0
     max_tokens: int | None = None
+    stream_enabled: bool = True
+    parallel_tool_calls: bool = True
+    max_tool_rounds: int = 8
+    provider_options: dict[str, Any] = Field(default_factory=dict)
 
 
 class GraphSettings(BaseModel):
@@ -53,11 +59,16 @@ class Settings(BaseSettings):
     log_level: str = Field(default="info")
 
     llm_api_key: SecretStr | None = Field(default=None)
+    llm_provider: str = Field(default="openai")
+    llm_protocol: Literal["responses", "chat"] = Field(default="responses")
     llm_base_url: str | None = Field(default=None)
     llm_model: str = Field(default="gpt-4o-mini")
     llm_temperature: float = Field(default=0.0, ge=0, le=2)
     llm_timeout: float = Field(default=60.0, gt=0)
     llm_max_tokens: int | None = Field(default=None, ge=1)
+    llm_stream_enabled: bool = Field(default=True)
+    llm_parallel_tool_calls: bool = Field(default=True)
+    llm_max_tool_rounds: int = Field(default=8, ge=1)
 
     graph_default_name: str = Field(default="text-analysis")
     graph_debug: bool = Field(default=False)
@@ -81,11 +92,16 @@ class Settings(BaseSettings):
     def llm(self) -> LLMSettings:
         return LLMSettings(
             api_key=self.llm_api_key,
+            provider=self.llm_provider,
+            protocol=self.llm_protocol,
             base_url=self.llm_base_url,
             model=self.llm_model,
             temperature=self.llm_temperature,
             timeout=self.llm_timeout,
             max_tokens=self.llm_max_tokens,
+            stream_enabled=self.llm_stream_enabled,
+            parallel_tool_calls=self.llm_parallel_tool_calls,
+            max_tool_rounds=self.llm_max_tool_rounds,
         )
 
     @property
