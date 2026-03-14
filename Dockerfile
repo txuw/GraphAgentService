@@ -23,6 +23,7 @@ ENV PYTHONUNBUFFERED=1
 
 COPY --from=builder /app/.venv /app/.venv
 COPY --from=builder /app/src /app/src
+COPY settings.yaml ./
 
 EXPOSE 8000
 

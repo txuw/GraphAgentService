@@ -16,7 +16,7 @@ def create_app() -> FastAPI:
         checkpoint_provider=checkpoint_provider,
     )
 
-    app = FastAPI(title=settings.app_name)
+    app = FastAPI(title=settings.app.name)
     app.state.graph_service = GraphService(graph_registry)
     app.include_router(api_router)
 

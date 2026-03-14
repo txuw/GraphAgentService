@@ -1,123 +1,64 @@
 from __future__ import annotations
 
+import os
+import tomllib
+from collections.abc import Mapping
 from functools import lru_cache
-from typing import Any, Literal
+from pathlib import Path
+from typing import Any
 
-from pydantic import BaseModel, Field, SecretStr
-from pydantic_settings import BaseSettings, SettingsConfigDict
+from dynaconf import Dynaconf
+from dynaconf.utils.boxing import DynaBox
+from dotenv import dotenv_values
 
-
-class AppSettings(BaseModel):
-    app_name: str
-    app_env: str
-    host: str
-    port: int
-    reload: bool
-    log_level: str
-
-
-class LLMSettings(BaseModel):
-    api_key: SecretStr | None = None
-    provider: str = "openai"
-    protocol: Literal["responses", "chat"] = "responses"
-    base_url: str | None = None
-    model: str = "gpt-4o-mini"
-    temperature: float = 0.0
-    timeout: float = 60.0
-    max_tokens: int | None = None
-    stream_enabled: bool = True
-    parallel_tool_calls: bool = True
-    max_tool_rounds: int = 8
-    provider_options: dict[str, Any] = Field(default_factory=dict)
+Settings = Dynaconf
+AppSettings = DynaBox
+LLMSettings = DynaBox
+GraphSettings = DynaBox
+ObservabilitySettings = DynaBox
 
 
-class GraphSettings(BaseModel):
-    default_name: str = "text-analysis"
-    debug: bool = False
-    enable_structured_output: bool = True
-    checkpoint_mode: Literal["memory", "disabled"] = "memory"
+def _parse_env_value(value: str) -> Any:
+    candidate = value.strip()
+    if not candidate:
+        return value
+
+    try:
+        return tomllib.loads(f"value = {candidate}")["value"]
+    except tomllib.TOMLDecodeError:
+        return value
 
 
-class ObservabilitySettings(BaseModel):
-    log_payloads: bool = False
+def _build_nested_overrides(values: Mapping[str, str | None]) -> dict[str, Any]:
+    data: dict[str, Any] = {}
 
+    for key, raw_value in values.items():
+        if raw_value is None or "__" not in key:
+            continue
 
-class Settings(BaseSettings):
-    model_config = SettingsConfigDict(
-        env_file=".env",
-        env_file_encoding="utf-8",
-        env_prefix="OVERMIND_",
-        case_sensitive=False,
-        extra="ignore",
-    )
+        path = [part.lower() for part in key.split("__") if part]
+        if not path:
+            continue
 
-    app_name: str = Field(default="OverMindAgent")
-    app_env: str = Field(default="local")
-    host: str = Field(default="0.0.0.0")
-    port: int = Field(default=8000)
-    reload: bool = Field(default=False)
-    log_level: str = Field(default="info")
+        current = data
+        for part in path[:-1]:
+            current = current.setdefault(part, {})
+        current[path[-1]] = _parse_env_value(raw_value)
 
-    llm_api_key: SecretStr | None = Field(default=None)
-    llm_provider: str = Field(default="openai")
-    llm_protocol: Literal["responses", "chat"] = Field(default="responses")
-    llm_base_url: str | None = Field(default=None)
-    llm_model: str = Field(default="gpt-4o-mini")
-    llm_temperature: float = Field(default=0.0, ge=0, le=2)
-    llm_timeout: float = Field(default=60.0, gt=0)
-    llm_max_tokens: int | None = Field(default=None, ge=1)
-    llm_stream_enabled: bool = Field(default=True)
-    llm_parallel_tool_calls: bool = Field(default=True)
-    llm_max_tool_rounds: int = Field(default=8, ge=1)
-
-    graph_default_name: str = Field(default="text-analysis")
-    graph_debug: bool = Field(default=False)
-    graph_enable_structured_output: bool = Field(default=True)
-    graph_checkpoint_mode: Literal["memory", "disabled"] = Field(default="memory")
-
-    observability_log_payloads: bool = Field(default=False)
-
-    @property
-    def app(self) -> AppSettings:
-        return AppSettings(
-            app_name=self.app_name,
-            app_env=self.app_env,
-            host=self.host,
-            port=self.port,
-            reload=self.reload,
-            log_level=self.log_level,
-        )
-
-    @property
-    def llm(self) -> LLMSettings:
-        return LLMSettings(
-            api_key=self.llm_api_key,
-            provider=self.llm_provider,
-            protocol=self.llm_protocol,
-            base_url=self.llm_base_url,
-            model=self.llm_model,
-            temperature=self.llm_temperature,
-            timeout=self.llm_timeout,
-            max_tokens=self.llm_max_tokens,
-            stream_enabled=self.llm_stream_enabled,
-            parallel_tool_calls=self.llm_parallel_tool_calls,
-            max_tool_rounds=self.llm_max_tool_rounds,
-        )
-
-    @property
-    def graph(self) -> GraphSettings:
-        return GraphSettings(
-            default_name=self.graph_default_name,
-            debug=self.graph_debug,
-            enable_structured_output=self.graph_enable_structured_output,
-            checkpoint_mode=self.graph_checkpoint_mode,
-        )
-
-    @property
-    def observability(self) -> ObservabilitySettings:
-        return ObservabilitySettings(log_payloads=self.observability_log_payloads)
+    return data
 
 
 @lru_cache
 def get_settings() -> Settings:
-    return Settings()
+    root = Path.cwd()
+    settings = Dynaconf(
+        settings_files=[str(root / "settings.yaml")],
+        envvar_prefix=False,
+        environments=False,
+        merge_enabled=True,
+        lowercase_read=True,
+        nested_separator="__",
+    )
+    settings.update(_build_nested_overrides(dotenv_values(root / ".env")), merge=True)
+    settings.update(_build_nested_overrides(os.environ), merge=True)
+    return settings

@@ -48,10 +48,10 @@ class BaseOpenAISession(LLMSession):
         return await self._invoke_with_client(client, request)
 
     def _create_client(self) -> AsyncOpenAI:
-        api_key = self._settings.api_key.get_secret_value() if self._settings.api_key else None
+        api_key = self._resolve_secret(self._settings.get("api_key"))
         if not api_key:
             raise MissingLLMConfigurationError(
-                "Missing OVERMIND_LLM_API_KEY for LLM invocation."
+                "Missing llm.api_key configuration for LLM invocation."
             )
 
         try:
@@ -70,6 +70,17 @@ class BaseOpenAISession(LLMSession):
         return AsyncOpenAI(**kwargs)
 
     @staticmethod
+    def _resolve_secret(value: Any) -> str | None:
+        if value is None:
+            return None
+
+        getter = getattr(value, "get_secret_value", None)
+        if callable(getter):
+            return getter()
+
+        return str(value)
+
+    @staticmethod
     def _build_input_messages(request: LLMRequest) -> list[dict[str, Any]]:
         input_messages: list[dict[str, Any]] = []
         if request.system_prompt:
@@ -86,6 +97,14 @@ class BaseOpenAISession(LLMSession):
             "schema": schema.model_json_schema(),
             "strict": True,
         }
+
+    @staticmethod
+    def _build_schema_prompt(schema: type[BaseModel]) -> str:
+        schema_json = json.dumps(schema.model_json_schema(), ensure_ascii=True, separators=(",", ":"))
+        return (
+            "Return only valid JSON that matches this JSON Schema exactly: "
+            f"{schema_json}"
+        )
 
     def _merge_options(self, request: LLMRequest) -> dict[str, Any]:
         options: dict[str, Any] = {
@@ -300,15 +319,27 @@ class OpenAIChatSession(BaseOpenAISession):
 
     def _build_create_params(self, request: LLMRequest) -> dict[str, Any]:
         params = self._merge_options(request)
-        params["messages"] = self._build_input_messages(request)
+        params["messages"] = self._build_chat_messages(request)
         if request.tools:
             params["tools"] = [self._tool_to_openai(tool) for tool in request.tools]
         if request.response_schema is not None:
-            params["response_format"] = {
-                "type": "json_schema",
-                "json_schema": self._build_json_schema(request.response_schema),
-            }
+            params["response_format"] = {"type": "json_object"}
         return params
+
+    def _build_chat_messages(self, request: LLMRequest) -> list[dict[str, Any]]:
+        messages = self._build_input_messages(request)
+        if request.response_schema is None:
+            return messages
+
+        schema_instruction = self._build_schema_prompt(request.response_schema)
+        if messages and messages[0]["role"] == "system":
+            messages[0] = {
+                **messages[0],
+                "content": f'{messages[0]["content"]}\n\n{schema_instruction}',
+            }
+            return messages
+
+        return [{"role": "system", "content": schema_instruction}, *messages]
 
     @staticmethod
     def _extract_chat_content(message: Any) -> str:

@@ -41,14 +41,12 @@ def test_text_analysis_nodes_handle_empty_input() -> None:
 
 
 def test_graph_registry_builds_text_analysis_graph() -> None:
-    from pydantic import SecretStr
-
     from overmindagent.common.config import LLMSettings
     from overmindagent.llm.factory import LLMSessionFactory
 
     factory = LLMSessionFactory(
         LLMSettings(
-            api_key=SecretStr("test-key"),
+            api_key="test-key",
             provider="openai",
             protocol="responses",
         )

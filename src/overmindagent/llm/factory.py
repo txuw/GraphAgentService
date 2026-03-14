@@ -24,10 +24,12 @@ class LLMSessionFactory:
         self._adapters[(adapter.provider_name, adapter.protocol_name)] = adapter
 
     def create(self, tool_registry: ToolRegistry | None = None) -> LLMSession:
-        adapter = self._adapters.get((self._settings.provider, self._settings.protocol))
+        provider = self._settings.get("provider", "openai")
+        protocol = self._settings.get("protocol", "responses")
+        adapter = self._adapters.get((provider, protocol))
         if adapter is None:
             raise UnsupportedLLMConfigurationError(
                 f"Unsupported provider/protocol combination: "
-                f"{self._settings.provider}/{self._settings.protocol}"
+                f"{provider}/{protocol}"
             )
         return adapter.build_session(settings=self._settings, tool_registry=tool_registry)

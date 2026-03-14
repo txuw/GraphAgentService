@@ -7,10 +7,10 @@ def main() -> None:
     settings = get_settings()
     uvicorn.run(
         "overmindagent.main:app",
-        host=settings.host,
-        port=settings.port,
-        reload=settings.reload,
-        log_level=settings.log_level,
+        host=settings.app.host,
+        port=settings.app.port,
+        reload=settings.app.reload,
+        log_level=settings.app.log_level,
     )
 
 
