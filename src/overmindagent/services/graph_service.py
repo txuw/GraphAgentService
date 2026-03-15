@@ -21,6 +21,12 @@ class GraphInvocationResult:
     output: BaseModel
 
 
+@dataclass(slots=True)
+class GraphStreamEvent:
+    event: str
+    data: dict[str, object]
+
+
 class GraphPayloadValidationError(ValueError):
     def __init__(self, *, graph_name: str, errors: list[dict[str, object]]) -> None:
         super().__init__(f"Invalid payload for graph: {graph_name}")
@@ -60,11 +66,22 @@ class GraphService:
         graph_name: str,
         payload: dict[str, object],
     ) -> AsyncIterator[str]:
+        async for event in self.stream_events(graph_name=graph_name, payload=payload):
+            yield self._to_sse(event.event, event.data)
+
+    async def stream_events(
+        self,
+        graph_name: str,
+        payload: dict[str, object],
+    ) -> AsyncIterator[GraphStreamEvent]:
         runtime = self._registry.get(graph_name)
         graph_input = self._validate_payload(runtime, payload)
         session_id = self._resolve_session_id(payload)
 
-        yield self._to_sse("session", {"graph_name": graph_name, "session_id": session_id})
+        yield GraphStreamEvent(
+            event="session",
+            data={"graph_name": graph_name, "session_id": session_id},
+        )
         final_state: dict[str, object] | None = None
         async for chunk in runtime.graph.astream(
             graph_input.model_dump(),
@@ -77,11 +94,14 @@ class GraphService:
             if chunk_type == "values":
                 final_state = chunk["data"]
                 continue
-            yield self._to_sse(chunk_type, self._serialize_stream_chunk(chunk))
+            yield GraphStreamEvent(
+                event=chunk_type,
+                data=self._serialize_stream_chunk(chunk),
+            )
 
         output = runtime.output_model.model_validate(final_state or {})
-        yield self._to_sse("result", output.model_dump())
-        yield self._to_sse("completed", {"session_id": session_id})
+        yield GraphStreamEvent(event="result", data=output.model_dump())
+        yield GraphStreamEvent(event="completed", data={"session_id": session_id})
 
     @staticmethod
     def _resolve_session_id(payload: dict[str, object]) -> str:

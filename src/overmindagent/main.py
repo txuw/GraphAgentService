@@ -4,7 +4,7 @@ from overmindagent.api import router as api_router
 from overmindagent.common import create_checkpoint_provider, get_settings
 from overmindagent.graphs import create_graph_registry
 from overmindagent.llm import LLMRouter
-from overmindagent.services import GraphService
+from overmindagent.services import ChatStreamService, GraphService, SseConnectionRegistry
 
 
 def create_app() -> FastAPI:
@@ -15,9 +15,14 @@ def create_app() -> FastAPI:
         settings=settings,
         checkpoint_provider=checkpoint_provider,
     )
+    graph_service = GraphService(graph_registry, llm_router)
+    sse_connection_registry = SseConnectionRegistry()
+    chat_stream_service = ChatStreamService(graph_service, sse_connection_registry)
 
     app = FastAPI(title=settings.app.name)
-    app.state.graph_service = GraphService(graph_registry, llm_router)
+    app.state.graph_service = graph_service
+    app.state.sse_connection_registry = sse_connection_registry
+    app.state.chat_stream_service = chat_stream_service
     app.include_router(api_router)
 
     @app.get("/")

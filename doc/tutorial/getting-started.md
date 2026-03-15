@@ -135,13 +135,22 @@ curl "http://127.0.0.1:8000/api/graphs"
 
 ## 7. 调用内置 Graph
 
+`/invoke` 接口统一返回一层固定包裹：
+
+- `success`
+- `graph_name`
+- `session_id`
+- `data`
+
+其中 `data` 才是 graph 自己的业务输出。
+
 非流式调用：
 
 ```bash
 curl -X POST "http://127.0.0.1:8000/api/graphs/text-analysis/invoke" -H "Content-Type: application/json" -d '{"text":"LangGraph is useful for workflow orchestration.","session_id":"demo-1"}'
 ```
 
-你会拿到一个结构化结果，包含：
+`text-analysis` 的 `data` 里会包含：
 
 - `normalized_text`
 - `analysis.language`
@@ -178,12 +187,26 @@ curl -N -X POST "http://127.0.0.1:8000/api/graphs/text-analysis/stream" -H "Cont
 curl -X POST "http://127.0.0.1:8000/api/graphs/tool-agent/invoke" -H "Content-Type: application/json" -d '{"query":"What is the weather in Shanghai?","session_id":"demo-tool-1"}'
 ```
 
-你会拿到：
+`tool-agent` 的 `data` 里会拿到：
 
 - `answer`
 - `tools_used[].tool_name`
 - `tools_used[].tool_args`
 - `tools_used[].result`
+
+当前默认工具集来自 `src/overmindagent/graphs/tool_agent/toolset.py`，内置：
+
+- `lookup_weather`
+- `lookup_local_time`
+- `calculate`
+
+这条 tool 链路的执行过程可以先这样理解：
+
+1. `prepare` 清洗 `query`，并把用户问题转成首条 `HumanMessage`
+2. `agent` 通过 `runtime.context.tool_model(binding="agent", tools=...)` 调模型
+3. 如果模型返回 tool call，`tools` 节点会通过 `ToolNode` 执行工具
+4. `tools_condition` 决定是否回到 `agent` 继续下一轮
+5. `finalize` 从消息列表里整理 `answer` 和 `tools_used`
 
 ## 8. 看懂代码应该从哪里开始
 
