@@ -1,55 +1,67 @@
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from typing import Any
 
+from langchain_core.tools import BaseTool
 from langgraph.graph import END, START, StateGraph
+from langgraph.prebuilt import tools_condition
 
 from overmindagent.graphs.runtime import GraphRunContext, GraphRuntime
-from overmindagent.graphs.state import (
-    TextAnalysisGraphInput,
-    TextAnalysisGraphOutput,
-    TextAnalysisGraphState,
+from overmindagent.graphs.tool_agent.nodes import ToolAgentNodes
+from overmindagent.graphs.tool_agent.state import (
+    ToolAgentGraphInput,
+    ToolAgentGraphOutput,
+    ToolAgentGraphState,
 )
-from overmindagent.nodes.text_analysis import TextAnalysisNodes
-from overmindagent.schemas.analysis import TextAnalysisOutput, TextAnalysisRequest
+from overmindagent.schemas.tool_agent import ToolAgentOutput, ToolAgentRequest
 
 
-class TextAnalysisGraphBuilder:
-    name = "text-analysis"
-    description = "Workflow graph for deterministic text normalization and structured analysis."
+class ToolAgentGraphBuilder:
+    name = "tool-agent"
+    description = "Agent-style graph that uses LangGraph ToolNode for iterative tool calling."
 
     def __init__(
         self,
         graph_settings: Mapping[str, Any] | None = None,
         checkpointer: Any | None = None,
+        tools: Sequence[BaseTool] | None = None,
     ) -> None:
         self._graph_settings = graph_settings or {}
-        self._nodes = TextAnalysisNodes()
+        self._nodes = ToolAgentNodes(tools=tools)
         self._checkpointer = checkpointer
 
     def build(self) -> GraphRuntime:
         graph = StateGraph(
-            state_schema=TextAnalysisGraphState,
+            state_schema=ToolAgentGraphState,
             context_schema=GraphRunContext,
-            input_schema=TextAnalysisGraphInput,
-            output_schema=TextAnalysisGraphOutput,
+            input_schema=ToolAgentGraphInput,
+            output_schema=ToolAgentGraphOutput,
         )
-        graph.add_node("preprocess", self._nodes.preprocess)
-        graph.add_node("analyze", self._nodes.analyze)
+        graph.add_node("prepare", self._nodes.prepare)
+        graph.add_node("agent", self._nodes.agent)
+        graph.add_node("tools", self._nodes.tool_node)
         graph.add_node("empty", self._nodes.empty)
         graph.add_node("finalize", self._nodes.finalize)
 
-        graph.add_edge(START, "preprocess")
+        graph.add_edge(START, "prepare")
         graph.add_conditional_edges(
-            "preprocess",
-            self._nodes.route_after_preprocess,
+            "prepare",
+            self._nodes.route_after_prepare,
             {
-                "analyze": "analyze",
+                "agent": "agent",
                 "empty": "empty",
             },
         )
-        graph.add_edge("analyze", "finalize")
+        graph.add_conditional_edges(
+            "agent",
+            tools_condition,
+            {
+                "tools": "tools",
+                "__end__": "finalize",
+            },
+        )
+        graph.add_edge("tools", "agent")
         graph.add_edge("empty", "finalize")
         graph.add_edge("finalize", END)
 
@@ -61,8 +73,8 @@ class TextAnalysisGraphBuilder:
             name=self.name,
             description=self.description,
             graph=graph.compile(**compile_kwargs),
-            input_model=TextAnalysisRequest,
-            output_model=TextAnalysisOutput,
+            input_model=ToolAgentRequest,
+            output_model=ToolAgentOutput,
             llm_bindings=self._llm_bindings(),
             stream_modes=("updates", "messages", "values"),
         )
@@ -73,5 +85,5 @@ class TextAnalysisGraphBuilder:
             return {
                 str(binding_name): str(profile_name)
                 for binding_name, profile_name in configured_bindings.items()
-            } or {"analysis": "structured_output"}
-        return {"analysis": "structured_output"}
+            } or {"agent": "tool_calling"}
+        return {"agent": "tool_calling"}

@@ -1,35 +1,67 @@
 from __future__ import annotations
 
-from overmindagent.common.config import LLMSettings
+from collections.abc import Callable
+from typing import Any
 
-from .adapters import (
-    OpenAIChatAdapter,
-    OpenAIResponsesAdapter,
-    ProviderAdapter,
-    UnsupportedLLMConfigurationError,
-)
-from .session import LLMSession
-from .tools import ToolRegistry
+from langchain_core.language_models.chat_models import BaseChatModel
+
+from .profile import LLMProfile
+
+ChatModelBuilder = Callable[[LLMProfile], BaseChatModel]
 
 
-class LLMSessionFactory:
-    def __init__(self, settings: LLMSettings) -> None:
-        self._settings = settings
-        self._adapters: dict[tuple[str, str], ProviderAdapter] = {}
-        self.register(OpenAIResponsesAdapter())
-        self.register(OpenAIChatAdapter())
+class ChatModelBuildError(RuntimeError):
+    pass
 
-    def register(self, adapter: ProviderAdapter) -> None:
-        # Provider and protocol together define a stable external session shape.
-        self._adapters[(adapter.provider_name, adapter.protocol_name)] = adapter
 
-    def create(self, tool_registry: ToolRegistry | None = None) -> LLMSession:
-        provider = self._settings.get("provider", "openai")
-        protocol = self._settings.get("protocol", "responses")
-        adapter = self._adapters.get((provider, protocol))
-        if adapter is None:
-            raise UnsupportedLLMConfigurationError(
-                f"Unsupported provider/protocol combination: "
-                f"{provider}/{protocol}"
-            )
-        return adapter.build_session(settings=self._settings, tool_registry=tool_registry)
+class ChatModelFactory:
+    def __init__(self) -> None:
+        self._builders: dict[str, ChatModelBuilder] = {}
+        self.register("openai", self._build_openai_model)
+
+    def register(self, provider_name: str, builder: ChatModelBuilder) -> None:
+        self._builders[provider_name] = builder
+
+    def create(self, profile: LLMProfile) -> BaseChatModel:
+        builder = self._builders.get(profile.provider)
+        if builder is None:
+            raise ChatModelBuildError(f"Unsupported llm provider: {profile.provider}")
+        return builder(profile)
+
+    @staticmethod
+    def _build_openai_model(profile: LLMProfile) -> BaseChatModel:
+        try:
+            from langchain_openai import ChatOpenAI
+        except ImportError as exc:  # pragma: no cover - environment dependent
+            raise ChatModelBuildError(
+                "The langchain-openai package is required. Run `uv sync` to install dependencies."
+            ) from exc
+
+        kwargs: dict[str, Any] = {
+            "model": profile.model,
+            "timeout": profile.timeout,
+        }
+        api_key = _resolve_secret(profile.api_key)
+        if api_key is not None:
+            kwargs["api_key"] = api_key
+        if profile.base_url:
+            kwargs["base_url"] = profile.base_url
+        if profile.temperature is not None:
+            kwargs["temperature"] = profile.temperature
+        if profile.max_tokens is not None:
+            kwargs["max_completion_tokens"] = profile.max_tokens
+        if profile.provider_options:
+            kwargs["model_kwargs"] = dict(profile.provider_options)
+
+        return ChatOpenAI(**kwargs)
+
+
+def _resolve_secret(value: Any) -> str | None:
+    if value is None:
+        return None
+
+    getter = getattr(value, "get_secret_value", None)
+    if callable(getter):
+        return getter()
+
+    return str(value)

@@ -1,23 +1,17 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
 from typing import Any
 
 from overmindagent.common.checkpoint import CheckpointProvider
-from overmindagent.llm.factory import LLMSessionFactory
-from overmindagent.nodes.text_analysis import TextAnalysisNodes
+from overmindagent.common.config import Settings
 
+from .runtime import GraphRuntime
 from .text_analysis import TextAnalysisGraphBuilder
+from .tool_agent import ToolAgentGraphBuilder
 
 
 class GraphNotFoundError(KeyError):
     pass
-
-
-@dataclass(frozen=True, slots=True)
-class GraphRuntime:
-    graph: Any
-    nodes: TextAnalysisNodes
 
 
 class GraphRegistry:
@@ -33,23 +27,39 @@ class GraphRegistry:
     def list_names(self) -> tuple[str, ...]:
         return tuple(self._graphs.keys())
 
+    def list_runtimes(self) -> tuple[GraphRuntime, ...]:
+        return tuple(self._graphs.values())
+
 
 def create_graph_registry(
-    llm_factory: LLMSessionFactory,
+    settings: Settings,
     checkpoint_provider: CheckpointProvider,
 ) -> GraphRegistry:
     checkpointer = checkpoint_provider.build()
-    text_analysis_nodes = TextAnalysisNodes(llm_session=llm_factory.create())
-    text_analysis_graph = TextAnalysisGraphBuilder(
-        nodes=text_analysis_nodes,
-        checkpointer=checkpointer,
-    ).build()
-
-    return GraphRegistry(
-        {
-            TextAnalysisGraphBuilder.name: GraphRuntime(
-                graph=text_analysis_graph,
-                nodes=text_analysis_nodes,
-            )
-        }
+    graph_overrides = _graph_overrides(settings)
+    runtimes = (
+        TextAnalysisGraphBuilder(
+            graph_settings=graph_overrides.get(TextAnalysisGraphBuilder.name, {}),
+            checkpointer=checkpointer,
+        ).build(),
+        ToolAgentGraphBuilder(
+            graph_settings=graph_overrides.get(ToolAgentGraphBuilder.name, {}),
+            checkpointer=checkpointer,
+        ).build(),
     )
+
+    return GraphRegistry({runtime.name: runtime for runtime in runtimes})
+
+
+def _graph_overrides(settings: Settings) -> dict[str, Any]:
+    configured_graphs = settings.get("graphs", {})
+    if hasattr(configured_graphs, "items"):
+        return {
+            _normalize_graph_name(graph_name): graph_settings
+            for graph_name, graph_settings in configured_graphs.items()
+        }
+    return {}
+
+
+def _normalize_graph_name(name: str) -> str:
+    return str(name).replace("_", "-")

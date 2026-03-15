@@ -10,12 +10,18 @@ CONFIG_ENV_KEYS = (
     "APP__PORT",
     "APP__RELOAD",
     "APP__LOG_LEVEL",
-    "LLM__API_KEY",
-    "LLM__BASE_URL",
-    "LLM__MODEL",
-    "LLM__PROVIDER",
-    "LLM__PROTOCOL",
+    "LLM__DEFAULT_PROFILE",
+    "LLM__ALIASES__GENERAL_CHAT",
+    "LLM__ALIASES__MULTIMODAL",
+    "LLM__ALIASES__STRUCTURED_OUTPUT",
+    "LLM__ALIASES__TOOL_CALLING",
+    "LLM__PROFILES__DEFAULT__API_KEY",
+    "LLM__PROFILES__DEFAULT__BASE_URL",
+    "LLM__PROFILES__DEFAULT__MODEL",
+    "LLM__PROFILES__DEFAULT__PROVIDER",
     "GRAPH__CHECKPOINT_MODE",
+    "GRAPHS__TEXT_ANALYSIS__LLM_BINDINGS__ANALYSIS",
+    "GRAPHS__TOOL_AGENT__LLM_BINDINGS__AGENT",
     "OBSERVABILITY__LOG_PAYLOADS",
     "DATABASE__HOST",
 )
@@ -33,9 +39,24 @@ def _write_settings_yaml(directory: Path) -> None:
               reload: false
               log_level: warning
             llm:
-              model: yaml-model
+              default_profile: default
+              aliases:
+                general_chat: default
+                multimodal: default
+                structured_output: default
+                tool_calling: default
+              profiles:
+                default:
+                  model: yaml-model
             graph:
               checkpoint_mode: memory
+            graphs:
+              text-analysis:
+                llm_bindings:
+                  analysis: structured_output
+              tool-agent:
+                llm_bindings:
+                  agent: tool_calling
             observability:
               log_payloads: false
             """
@@ -59,8 +80,11 @@ def test_settings_can_read_yaml_defaults(tmp_path, monkeypatch) -> None:
 
     assert settings.app.env == "yaml"
     assert settings.app.port == 8100
-    assert settings.llm.model == "yaml-model"
+    assert settings.llm.default_profile == "default"
+    assert settings.llm.profiles.default.model == "yaml-model"
     assert settings.graph.checkpoint_mode == "memory"
+    assert settings.graphs.text_analysis.llm_bindings.analysis == "structured_output"
+    assert settings.graphs.tool_agent.llm_bindings.agent == "tool_calling"
 
     get_settings.cache_clear()
 
@@ -73,7 +97,7 @@ def test_dotenv_can_override_yaml_with_nested_keys(tmp_path, monkeypatch) -> Non
             """\
             APP__ENV=dotenv
             APP__PORT=9000
-            LLM__MODEL=dotenv-model
+            LLM__PROFILES__DEFAULT__MODEL=dotenv-model
             GRAPH__CHECKPOINT_MODE=disabled
             """
         ),
@@ -86,7 +110,7 @@ def test_dotenv_can_override_yaml_with_nested_keys(tmp_path, monkeypatch) -> Non
 
     assert settings.app.env == "dotenv"
     assert settings.app.port == 9000
-    assert settings.llm.model == "dotenv-model"
+    assert settings.llm.profiles.default.model == "dotenv-model"
     assert settings.graph.checkpoint_mode == "disabled"
 
     get_settings.cache_clear()

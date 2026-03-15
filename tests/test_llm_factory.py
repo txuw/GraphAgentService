@@ -1,75 +1,135 @@
+import asyncio
+
 import pytest
 
 from overmindagent.common.config import LLMSettings
-from overmindagent.llm import LLMSessionFactory, MissingLLMConfigurationError
-from overmindagent.llm.adapters import OpenAIChatSession, OpenAIResponsesSession
-from overmindagent.llm.schemas import LLMMessage, LLMRequest
+from overmindagent.graphs import GraphRunContext
+from overmindagent.llm import ChatModelBuildError, ChatModelFactory, LLMRouter
 from overmindagent.schemas.analysis import StructuredTextAnalysis
 
 
-def test_llm_factory_requires_api_key() -> None:
-    factory = LLMSessionFactory(LLMSettings(provider="openai", protocol="responses"))
-    session = factory.create()
+class FakeStructuredRunnable:
+    def __init__(self, response) -> None:
+        self._response = response
 
-    with pytest.raises(MissingLLMConfigurationError):
-        session._create_client()
+    async def ainvoke(self, messages):
+        return self._response
 
 
-def test_llm_factory_creates_responses_session() -> None:
-    factory = LLMSessionFactory(
+class FakeChatModel:
+    def __init__(self, response, *, tags=None, metadata=None) -> None:
+        self._response = response
+        self.tags = list(tags or [])
+        self.metadata = dict(metadata or {})
+
+    def with_config(self, *, tags=None, metadata=None):
+        return FakeChatModel(
+            self._response,
+            tags=tags,
+            metadata=metadata,
+        )
+
+    def with_structured_output(self, schema, method="json_schema", **kwargs):
+        return FakeStructuredRunnable(self._response)
+
+    def bind_tools(self, tools, **kwargs):
+        return {
+            "tools": list(tools),
+            "kwargs": kwargs,
+            "tags": self.tags,
+            "metadata": self.metadata,
+        }
+
+
+def test_chat_model_factory_rejects_unknown_provider() -> None:
+    factory = ChatModelFactory()
+
+    with pytest.raises(ChatModelBuildError):
+        factory.create(
+            profile=type(
+                "Profile",
+                (),
+                {"provider": "unknown"},
+            )()
+        )
+
+
+def test_llm_router_resolves_alias_and_applies_observability_config() -> None:
+    response = StructuredTextAnalysis(
+        language="en",
+        summary="summary",
+        intent="classification",
+        sentiment="neutral",
+        categories=["test"],
+        confidence=0.9,
+    )
+    factory = ChatModelFactory()
+    factory.register("fake", lambda profile: FakeChatModel(response))
+    router = LLMRouter(
         LLMSettings(
-            api_key="test-key",
-            provider="openai",
-            protocol="responses",
-            base_url="https://example.com/v1",
-            model="gpt-test",
-            temperature=0.2,
-            timeout=30,
-            max_tokens=256,
-        )
+            default_profile="analysis",
+            aliases={"structured_output": "analysis"},
+            profiles={
+                "analysis": {
+                    "provider": "fake",
+                    "model": "fake-model",
+                }
+            },
+        ),
+        factory=factory,
     )
 
-    session = factory.create()
+    model = router.create_model(
+        profile="structured_output",
+        tags=("structured-output",),
+        metadata={"purpose": "test"},
+    )
 
-    assert isinstance(session, OpenAIResponsesSession)
+    assert model.tags == ["structured-output"]
+    assert model.metadata == {"purpose": "test"}
 
 
-def test_llm_factory_creates_chat_session() -> None:
-    factory = LLMSessionFactory(
+def test_graph_run_context_builds_structured_and_tool_models() -> None:
+    response = StructuredTextAnalysis(
+        language="en",
+        summary="summary",
+        intent="classification",
+        sentiment="neutral",
+        categories=["test"],
+        confidence=0.9,
+    )
+    factory = ChatModelFactory()
+    factory.register("fake", lambda profile: FakeChatModel(response))
+    router = LLMRouter(
         LLMSettings(
-            api_key="test-key",
-            provider="openai",
-            protocol="chat",
-            model="gpt-test",
-        )
+            aliases={"structured_output": "analysis"},
+            profiles={
+                "analysis": {
+                    "provider": "fake",
+                    "model": "fake-model",
+                }
+            },
+        ),
+        factory=factory,
+    )
+    context = GraphRunContext(
+        llm_router=router,
+        graph_name="text-analysis",
+        llm_bindings={"analysis": "structured_output"},
     )
 
-    session = factory.create()
-
-    assert isinstance(session, OpenAIChatSession)
-
-
-def test_chat_session_uses_json_object_for_structured_output() -> None:
-    session = OpenAIChatSession(
-        settings=LLMSettings(
-            api_key="test-key",
-            provider="openai",
-            protocol="chat",
-            model="gpt-test",
-            temperature=0.0,
-            timeout=30,
-            max_tokens=None,
-            provider_options={},
-        )
+    structured_model = context.structured_model(
+        binding="analysis",
+        schema=StructuredTextAnalysis,
+    )
+    result = asyncio.run(structured_model.ainvoke([]))
+    tool_model = context.tool_model(
+        binding="analysis",
+        tools=["lookup_weather"],
+        tool_choice="auto",
     )
 
-    params = session._build_create_params(
-        LLMRequest(
-            system_prompt="Analyze text precisely.",
-            messages=[LLMMessage(role="user", content="hello world")],
-            response_schema=StructuredTextAnalysis,
-        )
-    )
-
-    assert params["response_format"] == {"type": "json_object"}
-    assert "matches this JSON Schema exactly" in params["messages"][0]["content"]
+    assert result.intent == "classification"
+    assert tool_model["tools"] == ["lookup_weather"]
+    assert "graph:text-analysis" in tool_model["tags"]
+    assert tool_model["metadata"]["binding"] == "analysis"

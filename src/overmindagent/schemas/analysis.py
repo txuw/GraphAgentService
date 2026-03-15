@@ -7,7 +7,6 @@ from pydantic import BaseModel, Field
 
 class TextAnalysisRequest(BaseModel):
     text: str = Field(default="")
-    session_id: str | None = Field(default=None)
 
 
 class StructuredTextAnalysis(BaseModel):

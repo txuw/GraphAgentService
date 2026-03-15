@@ -31,6 +31,17 @@ def test_health_endpoint_returns_status() -> None:
     assert "environment" in response.json()
 
 
+def test_graph_list_endpoint_returns_runtime_metadata() -> None:
+    response = client.get("/api/graphs")
+
+    assert response.status_code == 200
+    graph_names = {item["name"] for item in response.json()}
+    assert {"text-analysis", "tool-agent"} <= graph_names
+    assert all("input_schema" in item for item in response.json())
+    assert all("output_schema" in item for item in response.json())
+    assert all("stream_modes" in item for item in response.json())
+
+
 def test_graph_invoke_endpoint_returns_structured_response() -> None:
     original_service = app.state.graph_service
 
@@ -38,7 +49,7 @@ def test_graph_invoke_endpoint_returns_structured_response() -> None:
         async def invoke(self, graph_name: str, payload):
             return GraphInvocationResult(
                 graph_name=graph_name,
-                session_id=payload.session_id or "session-1",
+                session_id=payload.get("session_id") or "session-1",
                 output=TextAnalysisOutput(
                     normalized_text="hello world",
                     analysis=StructuredTextAnalysis(
@@ -99,7 +110,7 @@ def test_graph_stream_endpoint_returns_sse_payload() -> None:
         async def invoke(self, graph_name: str, payload):
             return GraphInvocationResult(
                 graph_name=graph_name,
-                session_id=payload.session_id or "session-1",
+                session_id=payload.get("session_id") or "session-1",
                 output=TextAnalysisOutput(
                     normalized_text="hello world",
                     analysis=StructuredTextAnalysis(
