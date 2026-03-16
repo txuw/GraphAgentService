@@ -4,8 +4,10 @@ from langchain_core.messages import HumanMessage, SystemMessage
 from langgraph.runtime import Runtime
 
 from overmindagent.graphs.runtime import GraphRunContext
-from overmindagent.graphs.state import TextAnalysisGraphState
 from overmindagent.schemas.analysis import StructuredTextAnalysis
+
+from .prompts import ANALYSIS_PROMPT_TEMPLATE, SYSTEM_PROMPT
+from .state import TextAnalysisGraphState
 
 
 class TextAnalysisNodes:
@@ -53,16 +55,6 @@ class TextAnalysisNodes:
     @staticmethod
     def build_messages(normalized_text: str) -> list[object]:
         return [
-            SystemMessage(
-                content=(
-                    "You are a precise text analysis engine. "
-                    "Return a structured result that matches the requested schema."
-                )
-            ),
-            HumanMessage(
-                content=(
-                    "Analyze the following text and extract language, summary, intent, "
-                    f"sentiment, categories, and confidence:\n\n{normalized_text}"
-                )
-            ),
+            SystemMessage(content=SYSTEM_PROMPT),
+            HumanMessage(content=ANALYSIS_PROMPT_TEMPLATE.format(text=normalized_text)),
         ]

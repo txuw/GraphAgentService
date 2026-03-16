@@ -25,7 +25,7 @@
 ├── src/overmindagent/common   # 配置与公共基础设施
 ├── src/overmindagent/graphs   # Graph builder / registry / runtime / state
 ├── src/overmindagent/llm      # ChatModel profile / router / factory
-├── src/overmindagent/nodes    # Graph 节点
+├── src/overmindagent/tools    # 可复用工具定义与注册
 ├── src/overmindagent/schemas  # Pydantic 输入输出模型
 ├── src/overmindagent/services # Graph 编排服务
 ├── tests                      # 测试
@@ -135,7 +135,7 @@ DATABASE__HOST=127.0.0.1
 
 `tool-agent` 则展示：
 
-- graph 私有 `toolset.py`
+- 顶层 `tools/` 复用工具模块与注册入口
 - 模型节点与工具节点循环编排
 - tool trace 输出
 

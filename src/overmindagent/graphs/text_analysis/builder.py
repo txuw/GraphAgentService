@@ -6,13 +6,14 @@ from typing import Any
 from langgraph.graph import END, START, StateGraph
 
 from overmindagent.graphs.runtime import GraphRunContext, GraphRuntime
-from overmindagent.graphs.state import (
+from overmindagent.schemas.analysis import TextAnalysisOutput, TextAnalysisRequest
+
+from .nodes import TextAnalysisNodes
+from .state import (
     TextAnalysisGraphInput,
     TextAnalysisGraphOutput,
     TextAnalysisGraphState,
 )
-from overmindagent.nodes.text_analysis import TextAnalysisNodes
-from overmindagent.schemas.analysis import TextAnalysisOutput, TextAnalysisRequest
 
 
 class TextAnalysisGraphBuilder:

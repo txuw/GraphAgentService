@@ -2,25 +2,8 @@ from __future__ import annotations
 
 import ast
 import operator
-from datetime import datetime
-from zoneinfo import ZoneInfo
 
-from langchain_core.tools import BaseTool, tool
-
-_WEATHER_SNAPSHOTS = {
-    "beijing": "Beijing weather is sunny, 26C, with light wind.",
-    "hangzhou": "Hangzhou weather is cloudy, 24C, with possible light rain.",
-    "shanghai": "Shanghai weather is cloudy, 25C, with humid air.",
-    "shenzhen": "Shenzhen weather is warm, 29C, with scattered clouds.",
-}
-
-_CITY_TIMEZONES = {
-    "beijing": "Asia/Shanghai",
-    "hangzhou": "Asia/Shanghai",
-    "shanghai": "Asia/Shanghai",
-    "shenzhen": "Asia/Shanghai",
-    "san francisco": "America/Los_Angeles",
-}
+from langchain_core.tools import tool
 
 _BINARY_OPERATORS = {
     ast.Add: operator.add,
@@ -39,30 +22,6 @@ _UNARY_OPERATORS = {
 
 
 @tool
-def lookup_weather(location: str) -> str:
-    """Look up a canned weather snapshot for a city."""
-    normalized = location.strip().lower()
-    if not normalized:
-        return "No location was provided."
-    return _WEATHER_SNAPSHOTS.get(
-        normalized,
-        f"No weather snapshot is configured for {location}.",
-    )
-
-
-@tool
-def lookup_local_time(city: str) -> str:
-    """Look up the current local time for a supported city."""
-    normalized = city.strip().lower()
-    timezone_name = _CITY_TIMEZONES.get(normalized)
-    if timezone_name is None:
-        return f"No timezone mapping is configured for {city}."
-
-    current_time = datetime.now(ZoneInfo(timezone_name)).strftime("%Y-%m-%d %H:%M:%S")
-    return f"The local time in {city} is {current_time} ({timezone_name})."
-
-
-@tool
 def calculate(expression: str) -> str:
     """Evaluate a basic arithmetic expression."""
     try:
@@ -70,10 +29,6 @@ def calculate(expression: str) -> str:
     except (SyntaxError, ValueError, ZeroDivisionError) as exc:
         return f"Failed to calculate expression: {exc}"
     return f"The result of {expression} is {value}."
-
-
-def build_toolset() -> list[BaseTool]:
-    return [lookup_weather, lookup_local_time, calculate]
 
 
 def _evaluate_expression(expression: str) -> float | int:

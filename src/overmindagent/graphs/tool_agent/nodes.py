@@ -11,8 +11,8 @@ from langgraph.runtime import Runtime
 from overmindagent.graphs.runtime import GraphRunContext
 from overmindagent.graphs.tool_agent.prompts import SYSTEM_PROMPT
 from overmindagent.graphs.tool_agent.state import ToolAgentGraphState
-from overmindagent.graphs.tool_agent.toolset import build_toolset
 from overmindagent.schemas.tool_agent import ToolCallTrace
+from overmindagent.tools import build_toolset
 
 
 class ToolAgentNodes:
