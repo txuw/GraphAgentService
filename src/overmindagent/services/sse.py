@@ -111,6 +111,12 @@ class SseConnectionRegistry:
             self._connections.pop(key, None)
         await connection.close()
 
+    async def close_all(self) -> None:
+        connections = list(self._connections.values())
+        self._connections.clear()
+        for connection in connections:
+            await connection.close()
+
     async def send_connected_event(self, connection: SseConnection) -> None:
         await self.send(
             session_id=connection.session_id,
