@@ -13,7 +13,6 @@ llm:
     multimodal: mult_model
     structured_output: default
     tool_calling: default
-    image_agent: mult_model
   profiles:
     default:
       api_key: null
@@ -45,6 +44,9 @@ graphs:
     llm_bindings:
       analysis: structured_output
   image-agent:
+    llm_bindings:
+      analysis: multimodal
+  image-analyze-calories:
     llm_bindings:
       analysis: multimodal
   tool-agent:

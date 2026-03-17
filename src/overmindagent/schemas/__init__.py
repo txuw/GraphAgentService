@@ -5,11 +5,14 @@ from .api import (
     GraphDescriptorResponse,
     GraphInvokeResponse,
 )
+from .image_calories import CalorieInfo, FoodItem
 from .tool_agent import ToolAgentOutput, ToolAgentRequest, ToolCallTrace
 
 __all__ = [
+    "CalorieInfo",
     "ChatExecuteRequest",
     "ChatExecuteResponse",
+    "FoodItem",
     "GraphDescriptorResponse",
     "GraphInvokeResponse",
     "StructuredTextAnalysis",

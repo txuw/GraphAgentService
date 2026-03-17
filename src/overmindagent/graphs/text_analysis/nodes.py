@@ -31,7 +31,7 @@ class TextAnalysisNodes:
             schema=StructuredTextAnalysis,
             tags=("structured-output",),
         )
-        analysis = await model.ainvoke(self.build_messages(state["normalized_text"]))
+        analysis = await model.invoke(self.build_messages(state["normalized_text"]))
         return {"analysis": analysis}
 
     def empty(self, state: TextAnalysisGraphState) -> TextAnalysisGraphState:

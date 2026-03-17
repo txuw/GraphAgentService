@@ -9,6 +9,7 @@ from .runtime import GraphRuntime
 from .text_analysis import TextAnalysisGraphBuilder
 from .tool_agent import ToolAgentGraphBuilder
 from .image_agent import ImageGraphBuilder
+from .image_analyze_calories import ImageAnalyzeCaloriesGraphBuilder
 
 
 class GraphNotFoundError(KeyError):
@@ -49,6 +50,10 @@ def create_graph_registry(
         ).build(),
         ImageGraphBuilder(
             graph_settings=graph_overrides.get(ImageGraphBuilder.name, {}),
+            checkpointer=checkpointer,
+        ).build(),
+        ImageAnalyzeCaloriesGraphBuilder(
+            graph_settings=graph_overrides.get(ImageAnalyzeCaloriesGraphBuilder.name, {}),
             checkpointer=checkpointer,
         ).build(),
     )
