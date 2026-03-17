@@ -6,19 +6,15 @@ from typing import Any
 from langgraph.graph import END, START, StateGraph
 
 from overmindagent.graphs.runtime import GraphRunContext, GraphRuntime
-from overmindagent.schemas.image import ImageAgentOutput,ImageAgentRequest
+from overmindagent.schemas.image import ImageAgentOutput, ImageAgentRequest
 
 from .nodes import ImageAgentNodes
-from .state import (
-    ImageGraphState,
-    ImageGraphInput,
-    ImageGraphOutput
-)
+from .state import ImageGraphInput, ImageGraphOutput, ImageGraphState
 
 
 class ImageGraphBuilder:
-    name = "image_agent"
-    description = "Workflow graph for deterministic text normalization and structured analysis."
+    name = "image-agent"
+    description = "Multimodal graph that answers a user question about an image URL."
 
     def __init__(
         self,
@@ -61,5 +57,5 @@ class ImageGraphBuilder:
             return {
                 str(binding_name): str(profile_name)
                 for binding_name, profile_name in configured_bindings.items()
-            } or {"image_agent": "image_agent"}
-        return {"image_agent": "image_agent"}
+            } or {"analysis": "multimodal"}
+        return {"analysis": "multimodal"}

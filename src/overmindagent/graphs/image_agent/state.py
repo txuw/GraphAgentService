@@ -11,7 +11,7 @@ class ImageGraphInput(TypedDict):
 class ImageGraphState(TypedDict, total=False):
     text: str
     image_url: str
-    analysis: ImageGraphOutput
+    answer: str
 
 
 class ImageGraphOutput(TypedDict):

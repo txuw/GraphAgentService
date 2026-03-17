@@ -85,7 +85,7 @@ class GraphRunContext:
             tags=tags,
             metadata=metadata,
         )
-        return model.astream(**kwargs)
+        return model
 
     def tool_model(
         self,

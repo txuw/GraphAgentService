@@ -50,7 +50,7 @@ def create_graph_registry(
         ImageGraphBuilder(
             graph_settings=graph_overrides.get(ImageGraphBuilder.name, {}),
             checkpointer=checkpointer,
-        )
+        ).build(),
     )
 
     return GraphRegistry({runtime.name: runtime for runtime in runtimes})

@@ -10,7 +10,7 @@ llm:
   default_profile: default
   aliases:
     general_chat: default
-    multimodal: default
+    multimodal: mult_model
     structured_output: default
     tool_calling: default
     image_agent: mult_model
@@ -44,9 +44,9 @@ graphs:
   text-analysis:
     llm_bindings:
       analysis: structured_output
-  image_agent:
+  image-agent:
     llm_bindings:
-      analysis: image_agent
+      analysis: multimodal
   tool-agent:
     llm_bindings:
       agent: tool_calling
