@@ -70,6 +70,23 @@ class GraphRunContext:
         )
         return model.with_structured_output(schema, method=method, **kwargs)
 
+    def image_model(
+        self,
+        *,
+        binding: str | None = None,
+        profile: str | None = None,
+        tags: Sequence[str] = (),
+        metadata: Mapping[str, Any] | None = None,
+        **kwargs: Any,
+    ):
+        model = self.resolve_model(
+            binding=binding,
+            profile=profile,
+            tags=tags,
+            metadata=metadata,
+        )
+        return model.astream(**kwargs)
+
     def tool_model(
         self,
         *,

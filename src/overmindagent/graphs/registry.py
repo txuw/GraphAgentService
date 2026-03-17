@@ -8,6 +8,7 @@ from overmindagent.common.config import Settings
 from .runtime import GraphRuntime
 from .text_analysis import TextAnalysisGraphBuilder
 from .tool_agent import ToolAgentGraphBuilder
+from .image_agent import ImageGraphBuilder
 
 
 class GraphNotFoundError(KeyError):
@@ -46,6 +47,10 @@ def create_graph_registry(
             graph_settings=graph_overrides.get(ToolAgentGraphBuilder.name, {}),
             checkpointer=checkpointer,
         ).build(),
+        ImageGraphBuilder(
+            graph_settings=graph_overrides.get(ImageGraphBuilder.name, {}),
+            checkpointer=checkpointer,
+        )
     )
 
     return GraphRegistry({runtime.name: runtime for runtime in runtimes})

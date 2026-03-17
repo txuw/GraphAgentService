@@ -13,6 +13,7 @@ llm:
     multimodal: default
     structured_output: default
     tool_calling: default
+    image_agent: mult_model
   profiles:
     default:
       api_key: null
@@ -23,6 +24,15 @@ llm:
       timeout: 60.0
       max_tokens: null
       provider_options: {}
+    mult_model:
+      api_key: null
+      provider: openai
+      base_url: null
+      model: gpt-4o-mini
+      temperature: 0.0
+      timeout: 60.0
+      max_tokens: null
+      provider_options: { }
 
 graph:
   default_name: text-analysis
@@ -34,6 +44,9 @@ graphs:
   text-analysis:
     llm_bindings:
       analysis: structured_output
+  image_agent:
+    llm_bindings:
+      analysis: image_agent
   tool-agent:
     llm_bindings:
       agent: tool_calling
