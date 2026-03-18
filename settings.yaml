@@ -11,6 +11,7 @@ llm:
   aliases:
     general_chat: default
     multimodal: mult_model
+    planning: default
     structured_output: default
     tool_calling: default
   profiles:
@@ -42,6 +43,10 @@ graph:
 graphs:
   text-analysis:
     llm_bindings:
+      analysis: structured_output
+  plan-analyze:
+    llm_bindings:
+      planner: planning
       analysis: structured_output
   image-agent:
     llm_bindings:

@@ -6,6 +6,7 @@ from overmindagent.common.checkpoint import CheckpointProvider
 from overmindagent.common.config import Settings
 
 from .runtime import GraphRuntime
+from .plan_analyze import PlanAnalyzeGraphBuilder
 from .text_analysis import TextAnalysisGraphBuilder
 from .tool_agent import ToolAgentGraphBuilder
 from .image_agent import ImageGraphBuilder
@@ -42,6 +43,10 @@ def create_graph_registry(
     runtimes = (
         TextAnalysisGraphBuilder(
             graph_settings=graph_overrides.get(TextAnalysisGraphBuilder.name, {}),
+            checkpointer=checkpointer,
+        ).build(),
+        PlanAnalyzeGraphBuilder(
+            graph_settings=graph_overrides.get(PlanAnalyzeGraphBuilder.name, {}),
             checkpointer=checkpointer,
         ).build(),
         ToolAgentGraphBuilder(
