@@ -46,14 +46,26 @@ logto:
   audience:
   jwk_set_uri:
 
+mcp:
+  enabled: true
+  request_timeout: 30.0
+  tool_cache_ttl_seconds: 300
+  connections:
+    sport:
+      enabled: true
+      transport: streamable_http
+      url: "http://api.txuw.top/mcp-servers/sport-assistant-mcp"
+      headers: {}
+      server_description: "	sport-assistant-mcp"
+
 graphs:
   text-analysis:
     llm_bindings:
       analysis: structured_output
   plan-analyze:
     llm_bindings:
-      planner: planning
-      analysis: structured_output
+      analysis: tool_calling
+    mcp_servers: ["sport"]
   image-agent:
     llm_bindings:
       analysis: multimodal
@@ -63,6 +75,7 @@ graphs:
   tool-agent:
     llm_bindings:
       agent: tool_calling
+    mcp_servers: ["sport"]
 
 observability:
   log_payloads: false

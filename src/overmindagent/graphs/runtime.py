@@ -2,11 +2,15 @@ from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from pydantic import BaseModel
 
+from overmindagent.common.auth import AuthenticatedUser
 from overmindagent.llm.router import LLMRouter
+
+if TYPE_CHECKING:
+    from overmindagent.mcp import MCPToolResolver
 
 
 @dataclass(frozen=True, slots=True)
@@ -14,6 +18,10 @@ class GraphRunContext:
     llm_router: LLMRouter
     graph_name: str
     llm_bindings: Mapping[str, str] = field(default_factory=dict)
+    current_user: AuthenticatedUser = field(default_factory=AuthenticatedUser.anonymous)
+    request_headers: Mapping[str, str] = field(default_factory=dict)
+    mcp_tool_resolver: MCPToolResolver | None = None
+    mcp_servers: tuple[str, ...] = ()
 
     def resolve_model(
         self,
@@ -114,4 +122,5 @@ class GraphRuntime:
     input_model: type[BaseModel]
     output_model: type[BaseModel]
     llm_bindings: Mapping[str, str] = field(default_factory=dict)
+    mcp_servers: tuple[str, ...] = ()
     stream_modes: tuple[str, ...] = ("updates", "messages", "custom", "values")

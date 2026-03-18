@@ -3,12 +3,13 @@ from __future__ import annotations
 import json
 from typing import Any
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from fastapi.responses import StreamingResponse
 
-from overmindagent.api.dependencies import get_graph_service
+from overmindagent.api.dependencies import build_graph_request_context, get_graph_service
 from overmindagent.graphs.registry import GraphNotFoundError
 from overmindagent.llm import ChatModelBuildError
+from overmindagent.mcp import MCPConfigurationError, MCPToolResolutionError
 from overmindagent.schemas.api import GraphDescriptorResponse, GraphInvokeResponse
 from overmindagent.services.graph_service import GraphPayloadValidationError, GraphService
 
@@ -33,17 +34,22 @@ async def list_graphs(
 
 @router.post("/graphs/{graph_name}/invoke", response_model=GraphInvokeResponse)
 async def invoke_graph(
+    request: Request,
     graph_name: str,
     payload: dict[str, Any],
     graph_service: GraphService = Depends(get_graph_service),
 ) -> GraphInvokeResponse:
     try:
-        result = await graph_service.invoke(graph_name=graph_name, payload=payload)
+        result = await graph_service.invoke(
+            graph_name=graph_name,
+            payload=payload,
+            request_context=build_graph_request_context(request),
+        )
     except GraphNotFoundError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
     except GraphPayloadValidationError as exc:
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=exc.errors) from exc
-    except ChatModelBuildError as exc:
+    except (ChatModelBuildError, MCPConfigurationError, MCPToolResolutionError) as exc:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=str(exc),
@@ -58,19 +64,24 @@ async def invoke_graph(
 
 @router.post("/graphs/{graph_name}/stream")
 async def stream_graph(
+    request: Request,
     graph_name: str,
     payload: dict[str, Any],
     graph_service: GraphService = Depends(get_graph_service),
 ) -> StreamingResponse:
     async def event_generator():
         try:
-            async for chunk in graph_service.stream(graph_name=graph_name, payload=payload):
+            async for chunk in graph_service.stream(
+                graph_name=graph_name,
+                payload=payload,
+                request_context=build_graph_request_context(request),
+            ):
                 yield chunk
         except GraphNotFoundError as exc:
             yield _to_sse("error", {"detail": str(exc)})
         except GraphPayloadValidationError as exc:
             yield _to_sse("error", {"detail": exc.errors})
-        except ChatModelBuildError as exc:
+        except (ChatModelBuildError, MCPConfigurationError, MCPToolResolutionError) as exc:
             yield _to_sse("error", {"detail": str(exc)})
 
     return StreamingResponse(event_generator(), media_type="text/event-stream")

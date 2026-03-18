@@ -4,7 +4,7 @@ from fastapi import Depends, HTTPException, Request
 
 from overmindagent.common.auth import AuthenticatedUser, AuthenticationError, LogtoAuthenticator
 from overmindagent.services.chat_stream_service import ChatStreamService
-from overmindagent.services.graph_service import GraphService
+from overmindagent.services.graph_service import GraphRequestContext, GraphService
 from overmindagent.services.sse import SseConnectionRegistry
 
 
@@ -42,3 +42,10 @@ def get_current_user(request: Request) -> AuthenticatedUser:
     if isinstance(current_user, AuthenticatedUser):
         return current_user
     return AuthenticatedUser.anonymous()
+
+
+def build_graph_request_context(request: Request) -> GraphRequestContext:
+    return GraphRequestContext(
+        current_user=get_current_user(request),
+        request_headers=dict(request.headers),
+    )

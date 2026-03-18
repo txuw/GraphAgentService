@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import replace
 from typing import Any
 
 from overmindagent.common.checkpoint import CheckpointProvider
@@ -63,7 +64,14 @@ def create_graph_registry(
         ).build(),
     )
 
-    return GraphRegistry({runtime.name: runtime for runtime in runtimes})
+    applied_runtimes = tuple(
+        _apply_runtime_overrides(
+            runtime=runtime,
+            graph_settings=graph_overrides.get(runtime.name, {}),
+        )
+        for runtime in runtimes
+    )
+    return GraphRegistry({runtime.name: runtime for runtime in applied_runtimes})
 
 
 def _graph_overrides(settings: Settings) -> dict[str, Any]:
@@ -78,3 +86,35 @@ def _graph_overrides(settings: Settings) -> dict[str, Any]:
 
 def _normalize_graph_name(name: str) -> str:
     return str(name).replace("_", "-")
+
+
+def _apply_runtime_overrides(
+    *,
+    runtime: GraphRuntime,
+    graph_settings: Any,
+) -> GraphRuntime:
+    return replace(
+        runtime,
+        mcp_servers=_read_mcp_servers(graph_settings),
+    )
+
+
+def _read_mcp_servers(graph_settings: Any) -> tuple[str, ...]:
+    if hasattr(graph_settings, "get"):
+        raw_value = graph_settings.get("mcp_servers", ())
+    else:
+        raw_value = ()
+
+    if isinstance(raw_value, str):
+        candidate = raw_value.strip()
+        return (candidate,) if candidate else ()
+
+    if not isinstance(raw_value, (list, tuple)):
+        return ()
+
+    normalized_servers: list[str] = []
+    for server_name in raw_value:
+        candidate = str(server_name).strip()
+        if candidate:
+            normalized_servers.append(candidate)
+    return tuple(normalized_servers)

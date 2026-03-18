@@ -7,8 +7,14 @@ from uuid import uuid4
 
 from overmindagent.graphs.registry import GraphNotFoundError
 from overmindagent.llm import ChatModelBuildError
+from overmindagent.mcp import MCPConfigurationError, MCPToolResolutionError
 
-from .graph_service import GraphPayloadValidationError, GraphService, GraphStreamEvent
+from .graph_service import (
+    GraphPayloadValidationError,
+    GraphRequestContext,
+    GraphService,
+    GraphStreamEvent,
+)
 from .sse import SseConnectionNotFoundError, SseConnectionRegistry
 
 
@@ -306,6 +312,7 @@ class ChatStreamService:
         session_id: str,
         page_id: str,
         request_id: str | None = None,
+        request_context: GraphRequestContext | None = None,
     ) -> ChatStreamAccepted:
         self._sse_connection_registry.require(session_id=session_id, page_id=page_id)
 
@@ -317,6 +324,7 @@ class ChatStreamService:
                 session_id=session_id,
                 page_id=page_id,
                 request_id=resolved_request_id,
+                request_context=request_context,
             )
         )
         self._tasks.add(task)
@@ -337,6 +345,7 @@ class ChatStreamService:
         session_id: str,
         page_id: str,
         request_id: str,
+        request_context: GraphRequestContext | None,
     ) -> None:
         adapter = SseEventAdapter(
             graph_name=graph_name,
@@ -351,6 +360,7 @@ class ChatStreamService:
             async for event in self._graph_service.stream_events(
                 graph_name=graph_name,
                 payload=graph_payload,
+                request_context=request_context,
             ):
                 for adapted_event in adapter.adapt(event):
                     await self._send_adapted_event(
@@ -418,4 +428,6 @@ class ChatStreamService:
             return "INVALID_PAYLOAD"
         if isinstance(exc, ChatModelBuildError):
             return "MODEL_BUILD_ERROR"
+        if isinstance(exc, (MCPConfigurationError, MCPToolResolutionError)):
+            return "MCP_ERROR"
         return "STREAM_EXECUTION_ERROR"

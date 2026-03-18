@@ -1,87 +1,99 @@
 from __future__ import annotations
 
+from collections.abc import Sequence
 from typing import Any
 
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
+from langchain_core.tools import BaseTool
+from langgraph.prebuilt import ToolNode, tools_condition
 from langgraph.runtime import Runtime
 
 from overmindagent.graphs.runtime import GraphRunContext
 
-from .prompts import (
-    ANALYSIS_PROMPT_TEMPLATE,
-    PLAN_PROMPT_TEMPLATE,
-    SYSTEM_ANALYSIS_PROMPT,
-    SYSTEM_PLAN_PROMPT,
-)
+from .prompts import ANALYSIS_PROMPT_TEMPLATE, SYSTEM_ANALYSIS_PROMPT
 from .state import PlanAnalyzeGraphState
 
 
 class PlanAnalyzeNodes:
     def __init__(
         self,
-        planner_binding: str = "planner",
         analysis_binding: str = "analysis",
     ) -> None:
-        self._planner_binding = planner_binding
         self._analysis_binding = analysis_binding
-
-    def prepare(self, state: PlanAnalyzeGraphState) -> PlanAnalyzeGraphState:
-        query = state.get("query", "").strip()
-        return {"query": query}
-
-    def route_after_prepare(self, state: PlanAnalyzeGraphState) -> str:
-        return "plan" if state.get("query") else "empty"
-
-    async def plan(
-        self,
-        state: PlanAnalyzeGraphState,
-        runtime: Runtime[GraphRunContext],
-    ) -> PlanAnalyzeGraphState:
-        model = runtime.context.resolve_model(
-            binding=self._planner_binding,
-            tags=("planning",),
-        )
-        response = await model.ainvoke(self.build_plan_messages(state["query"]))
-        return {"plan": self._content_to_text(response)}
 
     async def analyze(
         self,
         state: PlanAnalyzeGraphState,
         runtime: Runtime[GraphRunContext],
     ) -> PlanAnalyzeGraphState:
+        query = state.get("query", "").strip()
+        if not query:
+            return {
+                "query": "",
+                "plan": "",
+                "analysis": "No query provided.",
+                "messages": [],
+            }
+
+        messages = self.build_analysis_messages(
+            query=query,
+            plan=state.get("plan", ""),
+            messages=state.get("messages", ()),
+        )
+        tools = await self._resolve_tools(runtime)
+        if tools:
+            model = runtime.context.tool_model(
+                binding=self._analysis_binding,
+                tools=tools,
+                tags=("analysis", "tool-calling"),
+            )
+            response = await model.ainvoke(messages)
+            result: PlanAnalyzeGraphState = {
+                "query": query,
+                "plan": state.get("plan", ""),
+                "messages": [response],
+            }
+            if not response.tool_calls:
+                result["analysis"] = self._content_to_text(response)
+            return result
+
         model = runtime.context.resolve_model(
             binding=self._analysis_binding,
             tags=("analysis",),
         )
-        response = await model.ainvoke(
-            self.build_analysis_messages(
-                query=state["query"],
-                plan=state.get("plan", ""),
-            )
-        )
-        return {"analysis": self._content_to_text(response)}
-
-    def empty(self, state: PlanAnalyzeGraphState) -> PlanAnalyzeGraphState:
+        response = await model.ainvoke(messages)
         return {
-            "plan": "",
-            "analysis": "No query provided.",
-        }
-
-    def finalize(self, state: PlanAnalyzeGraphState) -> PlanAnalyzeGraphState:
-        return {
+            "query": query,
             "plan": state.get("plan", ""),
-            "analysis": state.get("analysis", ""),
+            "analysis": self._content_to_text(response),
         }
 
-    @staticmethod
-    def build_plan_messages(query: str) -> list[object]:
-        return [
-            SystemMessage(content=SYSTEM_PLAN_PROMPT),
-            HumanMessage(content=PLAN_PROMPT_TEMPLATE.format(query=query)),
-        ]
+    async def tools(
+        self,
+        state: PlanAnalyzeGraphState,
+        runtime: Runtime[GraphRunContext],
+    ) -> dict[str, list[object]]:
+        tools = await self._resolve_tools(runtime)
+        tool_node = ToolNode(tools)
+        result = await tool_node.ainvoke(state, runtime=runtime)
+        if isinstance(result, dict):
+            return result
+        return {"messages": list(result)}
+
+    def route_after_analyze(self, state: PlanAnalyzeGraphState) -> str:
+        if not state.get("messages"):
+            return "__end__"
+        return tools_condition(state)
 
     @staticmethod
-    def build_analysis_messages(*, query: str, plan: str) -> list[object]:
+    def build_analysis_messages(
+        *,
+        query: str,
+        plan: str,
+        messages: Sequence[object] = (),
+    ) -> list[object]:
+        if messages:
+            return [SystemMessage(content=SYSTEM_ANALYSIS_PROMPT), *list(messages)]
         return [
             SystemMessage(content=SYSTEM_ANALYSIS_PROMPT),
             HumanMessage(
@@ -91,6 +103,24 @@ class PlanAnalyzeNodes:
                 )
             ),
         ]
+
+    async def _resolve_tools(
+        self,
+        runtime: Runtime[GraphRunContext],
+    ) -> list[BaseTool]:
+        if not runtime.context.mcp_servers:
+            return []
+
+        resolver = runtime.context.mcp_tool_resolver
+        if resolver is None:
+            return []
+
+        return await resolver.resolve_tools(
+            graph_name=runtime.context.graph_name,
+            server_names=runtime.context.mcp_servers,
+            current_user=runtime.context.current_user,
+            request_headers=dict(runtime.context.request_headers),
+        )
 
     @staticmethod
     def _content_to_text(response: Any) -> str:

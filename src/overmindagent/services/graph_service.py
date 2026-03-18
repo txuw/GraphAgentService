@@ -9,9 +9,11 @@ from fastapi.encoders import jsonable_encoder
 from langchain_core.messages import message_to_dict
 from pydantic import BaseModel, ValidationError
 
+from overmindagent.common.auth import AuthenticatedUser
 from overmindagent.graphs.registry import GraphRegistry
 from overmindagent.graphs.runtime import GraphRunContext, GraphRuntime
 from overmindagent.llm.router import LLMRouter
+from overmindagent.mcp import MCPToolResolver
 
 
 @dataclass(slots=True)
@@ -27,6 +29,12 @@ class GraphStreamEvent:
     data: dict[str, object]
 
 
+@dataclass(frozen=True, slots=True)
+class GraphRequestContext:
+    current_user: AuthenticatedUser
+    request_headers: dict[str, str]
+
+
 class GraphPayloadValidationError(ValueError):
     def __init__(self, *, graph_name: str, errors: list[dict[str, object]]) -> None:
         super().__init__(f"Invalid payload for graph: {graph_name}")
@@ -35,9 +43,15 @@ class GraphPayloadValidationError(ValueError):
 
 
 class GraphService:
-    def __init__(self, registry: GraphRegistry, llm_router: LLMRouter) -> None:
+    def __init__(
+        self,
+        registry: GraphRegistry,
+        llm_router: LLMRouter,
+        mcp_tool_resolver: MCPToolResolver | None = None,
+    ) -> None:
         self._registry = registry
         self._llm_router = llm_router
+        self._mcp_tool_resolver = mcp_tool_resolver
 
     def list_graphs(self) -> tuple[GraphRuntime, ...]:
         return self._registry.list_runtimes()
@@ -46,6 +60,7 @@ class GraphService:
         self,
         graph_name: str,
         payload: dict[str, object],
+        request_context: GraphRequestContext | None = None,
     ) -> GraphInvocationResult:
         runtime = self._registry.get(graph_name)
         graph_input = self._validate_payload(runtime, payload)
@@ -53,7 +68,7 @@ class GraphService:
         state = await runtime.graph.ainvoke(
             graph_input.model_dump(),
             config={"configurable": {"thread_id": session_id}},
-            context=self._build_context(runtime),
+            context=self._build_context(runtime, request_context=request_context),
         )
         return GraphInvocationResult(
             graph_name=graph_name,
@@ -65,14 +80,20 @@ class GraphService:
         self,
         graph_name: str,
         payload: dict[str, object],
+        request_context: GraphRequestContext | None = None,
     ) -> AsyncIterator[str]:
-        async for event in self.stream_events(graph_name=graph_name, payload=payload):
+        async for event in self.stream_events(
+            graph_name=graph_name,
+            payload=payload,
+            request_context=request_context,
+        ):
             yield self._to_sse(event.event, event.data)
 
     async def stream_events(
         self,
         graph_name: str,
         payload: dict[str, object],
+        request_context: GraphRequestContext | None = None,
     ) -> AsyncIterator[GraphStreamEvent]:
         runtime = self._registry.get(graph_name)
         graph_input = self._validate_payload(runtime, payload)
@@ -86,7 +107,7 @@ class GraphService:
         async for chunk in runtime.graph.astream(
             graph_input.model_dump(),
             config={"configurable": {"thread_id": session_id}},
-            context=self._build_context(runtime),
+            context=self._build_context(runtime, request_context=request_context),
             stream_mode=list(runtime.stream_modes),
             version="v2",
         ):
@@ -110,11 +131,24 @@ class GraphService:
             return session_id
         return uuid4().hex
 
-    def _build_context(self, runtime: GraphRuntime) -> GraphRunContext:
+    def _build_context(
+        self,
+        runtime: GraphRuntime,
+        *,
+        request_context: GraphRequestContext | None = None,
+    ) -> GraphRunContext:
+        resolved_request_context = request_context or GraphRequestContext(
+            current_user=AuthenticatedUser.anonymous(),
+            request_headers={},
+        )
         return GraphRunContext(
             llm_router=self._llm_router,
             graph_name=runtime.name,
             llm_bindings=runtime.llm_bindings,
+            current_user=resolved_request_context.current_user,
+            request_headers=resolved_request_context.request_headers,
+            mcp_tool_resolver=self._mcp_tool_resolver,
+            mcp_servers=runtime.mcp_servers,
         )
 
     @staticmethod

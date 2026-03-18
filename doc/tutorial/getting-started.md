@@ -1,48 +1,62 @@
 # OverMindAgent 新手上手
 
-这是一份给第一次接触这个项目的开发者准备的快速教程。目标很简单：先把服务跑起来，再理解当前的 Graph 和 LLM 配置链路。
+这是一份面向当前代码库的快速上手文档。目标很简单：
+
+- 把服务跑起来
+- 配好一个可用的 LLM
+- 调通当前内置的几个 graph
+- 理解 `text-analysis`、`tool-agent`、`plan-analyze` 各自适合拿来做什么
+- 知道 MCP 在这个项目里是怎么接进 graph 的
+
+如果你刚接手项目，建议先看这篇，再看：
+
+- `doc/wiki/scaffold.md`
+- `doc/wiki/runtime-binding.md`
+- `doc/wiki/mcp.md`
 
 ## 1. 你会得到什么
 
-跑完这份教程后，你应该能做到：
+读完并跑通本教程后，你应该能做到：
 
 - 启动项目
-- 配置一个可用的 LLM profile
-- 理解 `settings.yaml + .env + 环境变量` 的配置方式
-- 调用 `text-analysis` graph
-- 调用 `tool-agent` graph
-- 看懂当前的 GraphRuntime / GraphRunContext / ChatModel 链路
-- 知道以后该从哪里扩展 graph、模型和 provider
+- 理解 `settings.yaml + .env + 环境变量` 的配置覆盖顺序
+- 配置一个可用的 OpenAI / OpenAI 兼容模型
+- 调用 `text-analysis`
+- 调用 `tool-agent`
+- 用 `plan-analyze` 调试最简 MCP 工具回路
+- 知道后续新增 graph 时应该从哪些文件开始改
 
 ## 2. 准备环境
 
 项目基于 Python 3.11+，依赖推荐使用 `uv` 管理。
 
-先复制本地配置模板：
+先复制本地环境变量模板：
 
-```bash
-cp .env.example .env
+```powershell
+Copy-Item ".env.example" ".env" -Force
 ```
 
-再安装依赖：
+安装依赖：
 
-```bash
+```powershell
 uv sync
 ```
 
 如果你使用自己的虚拟环境，也可以显式指定 Python：
 
-```bash
+```powershell
 uv sync --python ".venv/Scripts/python.exe"
 ```
 
-## 3. 先理解配置加载
+## 3. 先理解配置加载顺序
 
-当前项目配置按以下顺序加载，后者覆盖前者：
+当前项目的配置覆盖顺序固定为：
 
 1. `settings.yaml`
 2. `.env`
 3. 系统环境变量
+
+后者会覆盖前者。
 
 环境变量使用双下划线表示层级，例如：
 
@@ -50,23 +64,25 @@ uv sync --python ".venv/Scripts/python.exe"
 APP__PORT=9000
 LLM__PROFILES__DEFAULT__MODEL=gpt-4o-mini
 GRAPHS__TEXT_ANALYSIS__LLM_BINDINGS__ANALYSIS=structured_output
-DATABASE__HOST=127.0.0.1
+GRAPHS__PLAN_ANALYZE__LLM_BINDINGS__ANALYSIS=tool_calling
+GRAPHS__PLAN_ANALYZE__MCP_SERVERS=["sport"]
 ```
 
-代码里统一这样读取：
+代码里按层级读取，例如：
 
 - `settings.app.port`
 - `settings.llm.profiles.default.model`
 - `settings.graphs.text_analysis.llm_bindings.analysis`
-- `settings.database.host`
+- `settings.graphs.plan_analyze.mcp_servers`
 
-如果后续你要新增配置，不需要修改 `config.py`。只要在 `settings.yaml` 增加默认值，或直接在 `.env` / 环境变量里写入对应键，然后在代码里按层级访问即可。
+如果你后续新增配置，一般不需要改 `config.py`。  
+只要在 `settings.yaml` 增加默认值，或在 `.env` / 环境变量里覆盖，然后在代码里按层级读取即可。
 
 ## 4. 配置 LLM
 
-当前脚手架不再使用自定义 `LLMSession` / `protocol` 抽象，而是直接走 LangChain `BaseChatModel`。
+当前项目直接使用 LangChain 的 `BaseChatModel`，不再维护自定义 `LLMSession` / `protocol` 抽象。
 
-你至少要补这几个配置：
+最少需要补齐这些配置：
 
 ```env
 LLM__DEFAULT_PROFILE=default
@@ -75,8 +91,6 @@ LLM__ALIASES__TOOL_CALLING=default
 LLM__PROFILES__DEFAULT__API_KEY=your-api-key
 LLM__PROFILES__DEFAULT__PROVIDER=openai
 LLM__PROFILES__DEFAULT__MODEL=gpt-4o-mini
-GRAPHS__TEXT_ANALYSIS__LLM_BINDINGS__ANALYSIS=structured_output
-GRAPHS__TOOL_AGENT__LLM_BINDINGS__AGENT=tool_calling
 ```
 
 如果你接的是 OpenAI 兼容服务，还可以配置：
@@ -85,42 +99,115 @@ GRAPHS__TOOL_AGENT__LLM_BINDINGS__AGENT=tool_calling
 LLM__PROFILES__DEFAULT__BASE_URL=https://your-provider.example/v1
 ```
 
-理解这几层关系很重要：
+这里需要理解三层概念：
 
 - `profile`：真实模型配置，例如 `default`
-- `alias`：能力别名，例如 `structured_output`
-- `graph binding`：graph 内部节点需要什么能力，例如 `analysis -> structured_output`
+- `alias`：能力别名，例如 `structured_output`、`tool_calling`
+- `graph binding`：graph 内部某个 node 需要的能力，例如 `analysis -> tool_calling`
 
-所以，node 不会直接写死 `provider` 或 `model`，而是通过运行时上下文拿模型。
+也就是说，node 本身不会直接硬编码模型名，而是通过 `runtime.context` 解析到真正的 chat model。
 
-## 5. 启动项目
+## 5. 当前内置 graph 简介
 
-开发模式启动：
+当前项目里最常用的三个 graph 是：
 
-```bash
+### `text-analysis`
+
+适合验证结构化输出链路，特点是：
+
+- 走 `structured_model(...)`
+- 输出结构化分析结果
+- 不涉及 MCP
+
+### `tool-agent`
+
+适合验证标准工具调用回路，特点是：
+
+- `prepare -> agent <-> tools -> finalize`
+- 默认始终保留本地工具
+- 如果配置了 `mcp_servers`，会把远端 MCP 工具一并合并进来
+
+### `plan-analyze`
+
+当前已经被调整成最简 MCP 调试 graph，特点是：
+
+- 使用最简回路：`START -> analyze <-> tools -> END`
+- `analyze` 会按请求动态绑定 MCP 工具
+- 适合先把 Bearer 转发、工具发现、工具执行链路跑通
+
+它现在不是“先 planner 再 analyzer”的复杂示例，而是用来调试 MCP 最短闭环。
+
+## 6. 配置 MCP
+
+当前 MCP 的最小配置示例在 `settings.yaml` 里已经给出，结构大致如下：
+
+```yaml
+mcp:
+  enabled: true
+  request_timeout: 30.0
+  tool_cache_ttl_seconds: 300
+  connections:
+    sport:
+      enabled: true
+      transport: streamable_http
+      url: "http://api.txuw.top/mcp-servers/sport-assistant-mcp"
+      headers: {}
+      server_description: "体育工具 MCP"
+```
+
+某个 graph 是否接入 MCP，看的是：
+
+```yaml
+graphs:
+  plan-analyze:
+    llm_bindings:
+      analysis: tool_calling
+    mcp_servers: ["sport"]
+```
+
+这里有两个关键点：
+
+- `mcp_servers` 决定这个 graph 会接哪些远端 MCP
+- 要做工具调用的 binding，必须指向 `tool_calling`
+
+更完整的说明见：
+
+- `doc/wiki/mcp.md`
+
+## 7. 启动项目
+
+开发模式：
+
+```powershell
 uv run uvicorn overmindagent.main:app --reload
 ```
 
-或者直接用项目入口：
+或直接通过项目入口：
 
-```bash
+```powershell
 uv run overmindagent
 ```
 
 启动后先检查健康接口：
 
-```bash
-curl http://127.0.0.1:8000/health
+```powershell
+curl "http://127.0.0.1:8000/health"
 ```
 
-如果你改了 `APP__PORT`，记得把上面的端口一并替换。
+如果你改了 `APP__PORT`，记得把下面示例中的端口一起替换。
 
-## 6. 先看有哪些 Graph
+## 8. 先看有哪些 Graph
 
 当前服务暴露了 graph 发现接口：
 
-```bash
+```powershell
 curl "http://127.0.0.1:8000/api/graphs"
+```
+
+如果 Logto 开启了认证，需要额外带上：
+
+```powershell
+-H "Authorization: Bearer <token>"
 ```
 
 返回结果里会包含：
@@ -131,26 +218,19 @@ curl "http://127.0.0.1:8000/api/graphs"
 - `output_schema`
 - `stream_modes`
 
-这表示 Graph 自己描述自己的输入输出与流式能力，而不是由 service 层写死某一种 graph。
+这表示每个 graph 都能描述自己的输入输出与流式能力，而不是由 route 或 service 写死。
 
-## 7. 调用内置 Graph
-
-`/invoke` 接口统一返回一层固定包裹：
-
-- `success`
-- `graph_name`
-- `session_id`
-- `data`
-
-其中 `data` 才是 graph 自己的业务输出。
+## 9. 调用 `text-analysis`
 
 非流式调用：
 
-```bash
-curl -X POST "http://127.0.0.1:8000/api/graphs/text-analysis/invoke" -H "Content-Type: application/json" -d '{"text":"LangGraph is useful for workflow orchestration.","session_id":"demo-1"}'
+```powershell
+curl -X POST "http://127.0.0.1:8000/api/graphs/text-analysis/invoke" `
+  -H "Content-Type: application/json" `
+  -d "{\"text\":\"LangGraph is useful for workflow orchestration.\",\"session_id\":\"demo-text-1\"}"
 ```
 
-`text-analysis` 的 `data` 里会包含：
+它的 `data` 里会包含：
 
 - `normalized_text`
 - `analysis.language`
@@ -162,11 +242,13 @@ curl -X POST "http://127.0.0.1:8000/api/graphs/text-analysis/invoke" -H "Content
 
 流式调用：
 
-```bash
-curl -N -X POST "http://127.0.0.1:8000/api/graphs/text-analysis/stream" -H "Content-Type: application/json" -d '{"text":"LangGraph is useful for workflow orchestration.","session_id":"demo-1"}'
+```powershell
+curl -N -X POST "http://127.0.0.1:8000/api/graphs/text-analysis/stream" `
+  -H "Content-Type: application/json" `
+  -d "{\"text\":\"LangGraph is useful for workflow orchestration.\",\"session_id\":\"demo-text-1\"}"
 ```
 
-流式接口当前会返回 SSE 事件，例如：
+当前 `/stream` 会输出这些 SSE 事件：
 
 - `session`
 - `updates`
@@ -175,110 +257,179 @@ curl -N -X POST "http://127.0.0.1:8000/api/graphs/text-analysis/stream" -H "Cont
 - `completed`
 - `error`
 
-理解方式是：
+可以这样理解：
 
 - `updates`：LangGraph 节点更新了 state
-- `messages`：底层 ChatModel 正在流式吐 token / message chunk
-- `result`：Graph 的最终输出
+- `messages`：底层模型正在产生 message chunk
+- `result`：graph 最终输出
 
-再试一个工具型 graph：
+## 10. 调用 `tool-agent`
 
-```bash
-curl -X POST "http://127.0.0.1:8000/api/graphs/tool-agent/invoke" -H "Content-Type: application/json" -d '{"query":"What is the weather in Shanghai?","session_id":"demo-tool-1"}'
+调用示例：
+
+```powershell
+curl -X POST "http://127.0.0.1:8000/api/graphs/tool-agent/invoke" `
+  -H "Content-Type: application/json" `
+  -d "{\"query\":\"What is the weather in Shanghai?\",\"session_id\":\"demo-tool-1\"}"
 ```
 
-`tool-agent` 的 `data` 里会拿到：
+`tool-agent` 的 `data` 里通常会拿到：
 
 - `answer`
 - `tools_used[].tool_name`
 - `tools_used[].tool_args`
 - `tools_used[].result`
 
-当前默认工具集来自 `src/overmindagent/graphs/tool_agent/toolset.py`，内置：
+当前它的工具来源是：
 
-- `lookup_weather`
-- `lookup_local_time`
-- `calculate`
+- 本地默认工具：`src/overmindagent/tools/`
+- 如果配置了 `mcp_servers`，还会动态合并远端 MCP 工具
 
-这条 tool 链路的执行过程可以先这样理解：
+工具冲突规则是：
 
-1. `prepare` 清洗 `query`，并把用户问题转成首条 `HumanMessage`
-2. `agent` 通过 `runtime.context.tool_model(binding="agent", tools=...)` 调模型
-3. 如果模型返回 tool call，`tools` 节点会通过 `ToolNode` 执行工具
-4. `tools_condition` 决定是否回到 `agent` 继续下一轮
-5. `finalize` 从消息列表里整理 `answer` 和 `tools_used`
+- 本地工具优先
+- 远端重名工具跳过
+- 多个远端重名时保留先加入的那个
 
-## 8. 看懂代码应该从哪里开始
+## 11. 用 `plan-analyze` 调试 MCP
 
-如果你是第一次读这个项目，建议按这个顺序看：
+如果你的目标是“先把 MCP 链路跑通”，建议优先调这个 graph。
+
+调用示例：
+
+```powershell
+curl -X POST "http://127.0.0.1:8000/api/graphs/plan-analyze/invoke" `
+  -H "Content-Type: application/json" `
+  -H "Authorization: Bearer <token>" `
+  -d "{\"query\":\"你好\",\"session_id\":\"demo-plan-1\"}"
+```
+
+为什么这里建议显式带 Bearer：
+
+- 当前 MCP 默认会转发当前请求的 `Authorization`
+- 这样最接近真实生产链路
+- 即使本地 Logto 关闭，也建议调试时把 Bearer 一并带上，方便验证远端 MCP 是否吃到了认证头
+
+`plan-analyze` 当前用的是最简回路：
+
+```text
+START -> analyze <-> tools -> END
+```
+
+这条链路适合排查：
+
+- `mcp_servers` 是否生效
+- Bearer 是否被正确转发
+- 模型是否真正进入工具调用模式
+- `ToolNode` 是否执行了远端返回的工具
+
+如果你后续要把一个新 graph 接上 MCP，建议先模仿 `plan-analyze` 的最简模式，把链路调通后再加更复杂的业务节点。
+
+## 12. 读代码建议从哪里开始
+
+如果你第一次读这个项目，建议按这个顺序看：
 
 1. `src/overmindagent/main.py`
 2. `src/overmindagent/api/routes/graphs.py`
 3. `src/overmindagent/services/graph_service.py`
 4. `src/overmindagent/graphs/registry.py`
 5. `src/overmindagent/graphs/runtime.py`
-6. `src/overmindagent/graphs/text_analysis.py`
+6. `src/overmindagent/graphs/text_analysis/`
 7. `src/overmindagent/graphs/tool_agent/`
-8. `src/overmindagent/nodes/text_analysis.py`
-9. `src/overmindagent/llm/`
+8. `src/overmindagent/graphs/plan_analyze/`
+9. `src/overmindagent/mcp/`
+10. `src/overmindagent/llm/`
 
-理解顺序是：
+建议的理解顺序是：
 
-- API 接到请求
-- Service 根据 graph metadata 做输入校验、invoke 或 stream
-- Graph 通过 `context_schema` 拿到 `GraphRunContext`
-- Node 通过 `runtime.context.structured_model(...)` 获取模型
-- `LLMRouter` 根据 profile / alias / binding 产出具体 `BaseChatModel`
+- API 收到请求
+- Service 校验 payload 并构造 graph 运行上下文
+- Graph 根据 `GraphRuntime` 和 `GraphRunContext` 运行
+- Node 通过 `runtime.context` 获取模型或工具模型
+- MCP 通过 `mcp_tool_resolver` 在请求期解析远端工具
 
-## 9. 以后常见的三种扩展
+## 13. 后续常见扩展
 
-新增一个 Graph：
+### 新增一个 Graph
 
-1. 定义新的 schema
-2. 定义新的 state
-3. 写 node
-4. 写 graph builder
+通常需要做这些事：
+
+1. 定义 schema
+2. 定义 state
+3. 编写 nodes
+4. 编写 builder
 5. 产出 `GraphRuntime`
 6. 注册到 `graphs/registry.py`
 
-新增一个模型配置：
+### 让一个 Graph 支持 MCP
 
-1. 在 `settings.yaml` 或 `.env` 中新增 profile
-2. 按需要新增 alias
-3. 在 graph 的 `llm_bindings` 中切换绑定
+通常需要做这些事：
 
-新增一个 provider：
+1. 在 `settings.yaml` 中配置 `mcp.connections`
+2. 给 `graphs.<graph>.mcp_servers` 指定服务名
+3. 给会发起工具调用的 binding 配上 `tool_calling`
+4. 在 node 里通过 `runtime.context.tool_model(..., tools=...)` 绑定工具
+5. 如果要执行工具，builder 里必须有 `analyze <-> tools` 之类的回路
+
+### 新增一个 provider
+
+通常需要做这些事：
 
 1. 在 `src/overmindagent/llm/factory.py` 增加 builder
 2. 让 builder 返回对应的 `BaseChatModel`
 3. 补 provider 对应测试
 
-## 10. 什么时候看更完整的设计文档
+## 14. 常见误区
 
-当你需要理解这些内容时，再去看 Wiki 文档：
+### 误区 1：普通 `ainvoke()` 也能直接塞 `tools=...`
 
-- 为什么使用 `GraphRunContext`
-- profile / alias / graph binding 如何配合
-- GraphRuntime、Service、Route 的职责边界
-- LangGraph `v2` stream 如何映射到 SSE
+不要这么做。
 
-对应文档在：
+如果要做工具调用，应该走：
 
-- `doc/wiki/scaffold.md`
+```python
+runtime.context.tool_model(binding="analysis", tools=tools)
+```
 
-## 11. 验证改动
+而不是：
+
+```python
+runtime.context.resolve_model(...).ainvoke(messages, tools=tools)
+```
+
+后者很容易导致请求序列化报错。
+
+### 误区 2：builder 里只有 `START -> analyze -> END` 也能调工具
+
+不行。
+
+如果 graph 没有 `tools` 节点和回边，模型即使生成了 `tool_calls`，graph 也不会执行。
+
+### 误区 3：把 `ToolNode` 固定在构建期
+
+MCP 是请求级动态工具解析，所以 `ToolNode` 也应该在运行时基于当前请求的工具列表创建。
+
+## 15. 验证改动
 
 做完代码修改后，至少跑一次：
 
-```bash
+```powershell
 uv run pytest -q
 ```
 
-如果你改了模型路由或 graph 流式行为，建议额外验证：
+如果你改了 MCP 或工具调用行为，建议额外验证：
 
 - `GET /api/graphs`
-- 非流式 `invoke`
-- 流式 `stream`
-- `with_structured_output(...)`
-- `bind_tools(...)`
-- OpenAI 兼容 `base_url`
+- `POST /api/graphs/text-analysis/invoke`
+- `POST /api/graphs/tool-agent/invoke`
+- `POST /api/graphs/plan-analyze/invoke`
+- `POST /api/graphs/*/stream`
+
+## 16. 进一步阅读
+
+如果你想继续深入理解设计细节，建议接着看：
+
+- `doc/wiki/scaffold.md`
+- `doc/wiki/runtime-binding.md`
+- `doc/wiki/logto-auth.md`
+- `doc/wiki/mcp.md`

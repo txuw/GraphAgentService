@@ -18,7 +18,7 @@ from .state import (
 
 class PlanAnalyzeGraphBuilder:
     name = "plan-analyze"
-    description = "Workflow graph that drafts a plan first and then produces an analysis."
+    description = "Workflow graph that can loop through MCP tools during analysis."
 
     def __init__(
         self,
@@ -36,25 +36,19 @@ class PlanAnalyzeGraphBuilder:
             input_schema=PlanAnalyzeGraphInput,
             output_schema=PlanAnalyzeGraphOutput,
         )
-        graph.add_node("prepare", self._nodes.prepare)
-        graph.add_node("plan", self._nodes.plan)
         graph.add_node("analyze", self._nodes.analyze)
-        graph.add_node("empty", self._nodes.empty)
-        graph.add_node("finalize", self._nodes.finalize)
+        graph.add_node("tools", self._nodes.tools)
 
-        graph.add_edge(START, "prepare")
+        graph.add_edge(START, "analyze")
         graph.add_conditional_edges(
-            "prepare",
-            self._nodes.route_after_prepare,
+            "analyze",
+            self._nodes.route_after_analyze,
             {
-                "plan": "plan",
-                "empty": "empty",
+                "tools": "tools",
+                "__end__": END,
             },
         )
-        graph.add_edge("plan", "analyze")
-        graph.add_edge("analyze", "finalize")
-        graph.add_edge("empty", "finalize")
-        graph.add_edge("finalize", END)
+        graph.add_edge("tools", "analyze")
 
         compile_kwargs: dict[str, Any] = {}
         if self._checkpointer is not None:
@@ -76,11 +70,5 @@ class PlanAnalyzeGraphBuilder:
             return {
                 str(binding_name): str(profile_name)
                 for binding_name, profile_name in configured_bindings.items()
-            } or {
-                "planner": "planning",
-                "analysis": "structured_output",
-            }
-        return {
-            "planner": "planning",
-            "analysis": "structured_output",
-        }
+            } or {"analysis": "tool_calling"}
+        return {"analysis": "tool_calling"}

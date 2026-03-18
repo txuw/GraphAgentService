@@ -40,7 +40,7 @@ class ToolAgentGraphBuilder:
         )
         graph.add_node("prepare", self._nodes.prepare)
         graph.add_node("agent", self._nodes.agent)
-        graph.add_node("tools", self._nodes.tool_node)
+        graph.add_node("tools", self._nodes.tools)
         graph.add_node("empty", self._nodes.empty)
         graph.add_node("finalize", self._nodes.finalize)
 

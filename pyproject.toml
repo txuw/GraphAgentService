@@ -11,6 +11,7 @@ requires-python = ">=3.11"
 dependencies = [
     "dynaconf>=3.2.12",
     "fastapi>=0.135.1",
+    "langchain-mcp-adapters>=0.1.0",
     "langgraph>=0.6.6",
     "langchain-openai>=1.0.0",
     "openai>=1.68.2",

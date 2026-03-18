@@ -6,6 +6,7 @@ from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request, s
 from fastapi.responses import StreamingResponse
 
 from overmindagent.api.dependencies import (
+    build_graph_request_context,
     get_chat_stream_service,
     get_sse_connection_registry,
 )
@@ -56,6 +57,7 @@ async def connect_sse(
 
 @router.post("/chat/execute", response_model=ChatExecuteResponse)
 async def execute_chat(
+    request: Request,
     body: ChatExecuteRequest,
     chat_stream_service: ChatStreamService = Depends(get_chat_stream_service),
 ) -> ChatExecuteResponse:
@@ -66,6 +68,7 @@ async def execute_chat(
             session_id=body.session_id,
             page_id=body.page_id,
             request_id=body.request_id,
+            request_context=build_graph_request_context(request),
         )
     except SseConnectionNotFoundError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc

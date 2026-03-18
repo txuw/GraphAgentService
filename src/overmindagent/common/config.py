@@ -16,6 +16,7 @@ AppSettings = DynaBox
 LLMSettings = DynaBox
 GraphSettings = DynaBox
 LogtoSettings = DynaBox
+MCPSettings = DynaBox
 ObservabilitySettings = DynaBox
 
 

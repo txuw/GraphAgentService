@@ -6,6 +6,7 @@ from overmindagent.common import create_checkpoint_provider, get_settings
 from overmindagent.common.lifecycle import create_app_lifespan
 from overmindagent.graphs import create_graph_registry
 from overmindagent.llm import LLMRouter
+from overmindagent.mcp import MCPSettings, MCPToolResolver
 from overmindagent.services import ChatStreamService, GraphService, SseConnectionRegistry
 
 
@@ -14,11 +15,17 @@ def create_app() -> FastAPI:
     llm_router = LLMRouter(settings.llm)
     checkpoint_provider = create_checkpoint_provider(settings.graph)
     logto_authenticator = LogtoAuthenticator(settings.get("logto", {}))
+    mcp_settings = MCPSettings.model_validate(settings.get("mcp", {}))
+    mcp_tool_resolver = MCPToolResolver(mcp_settings)
     graph_registry = create_graph_registry(
         settings=settings,
         checkpoint_provider=checkpoint_provider,
     )
-    graph_service = GraphService(graph_registry, llm_router)
+    graph_service = GraphService(
+        graph_registry,
+        llm_router,
+        mcp_tool_resolver=mcp_tool_resolver,
+    )
     sse_connection_registry = SseConnectionRegistry()
     chat_stream_service = ChatStreamService(graph_service, sse_connection_registry)
     app = FastAPI(

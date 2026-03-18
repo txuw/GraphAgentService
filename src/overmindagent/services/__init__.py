@@ -2,6 +2,7 @@ from .chat_stream_service import ChatStreamAccepted, ChatStreamService, SseEvent
 from .graph_service import (
     GraphInvocationResult,
     GraphPayloadValidationError,
+    GraphRequestContext,
     GraphService,
     GraphStreamEvent,
 )
@@ -17,6 +18,7 @@ __all__ = [
     "ChatStreamService",
     "GraphInvocationResult",
     "GraphPayloadValidationError",
+    "GraphRequestContext",
     "GraphService",
     "GraphStreamEvent",
     "SseConnection",

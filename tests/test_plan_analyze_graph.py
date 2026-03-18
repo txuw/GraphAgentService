@@ -1,17 +1,23 @@
 from __future__ import annotations
 
 import asyncio
+from dataclasses import replace
 from types import SimpleNamespace
 
 import pytest
 from fastapi.testclient import TestClient
-from langchain_core.messages import AIMessage, HumanMessage
+from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
+from langchain_core.tools import tool
 
 from overmindagent.common.auth import AuthenticatedUser
 from overmindagent.graphs.plan_analyze import PlanAnalyzeGraphBuilder
 from overmindagent.graphs.registry import GraphRegistry
 from overmindagent.main import create_app
-from overmindagent.services.graph_service import GraphPayloadValidationError, GraphService
+from overmindagent.services.graph_service import (
+    GraphPayloadValidationError,
+    GraphRequestContext,
+    GraphService,
+)
 
 
 class FakeChatModel:
@@ -20,6 +26,7 @@ class FakeChatModel:
         self.calls: list[dict[str, object]] = []
         self.tags: list[str] = []
         self.metadata: dict[str, object] = {}
+        self.bound_tool_names: list[str] = []
 
     def with_config(
         self,
@@ -29,6 +36,10 @@ class FakeChatModel:
     ) -> "FakeChatModel":
         self.tags = list(tags or [])
         self.metadata = dict(metadata or {})
+        return self
+
+    def bind_tools(self, tools, **kwargs) -> "FakeChatModel":
+        self.bound_tool_names = [tool.name for tool in tools]
         return self
 
     async def ainvoke(self, messages: list[object]) -> AIMessage:
@@ -85,11 +96,10 @@ def test_graphs_api_lists_plan_analyze() -> None:
     assert "plan-analyze" in graph_names
 
 
-def test_plan_analyze_graph_returns_plan_and_analysis() -> None:
+def test_plan_analyze_graph_returns_analysis() -> None:
     runtime = PlanAnalyzeGraphBuilder().build()
     fake_model = FakeChatModel(
         responses={
-            "planner": "1. Inspect the request.\n2. Identify key constraints.",
             "analysis": "The request needs a workflow template with clear stages.",
         }
     )
@@ -108,46 +118,30 @@ def test_plan_analyze_graph_returns_plan_and_analysis() -> None:
         )
     )
 
-    assert result.output.plan == "1. Inspect the request.\n2. Identify key constraints."
+    assert result.output.plan == ""
     assert (
         result.output.analysis
         == "The request needs a workflow template with clear stages."
     )
-    assert len(fake_model.calls) == 2
+    assert len(fake_model.calls) == 1
 
-    planner_call = fake_model.calls[0]
-    assert planner_call["tags"] == [
-        "graph:plan-analyze",
-        "profile:planning",
-        "binding:planner",
-        "planning",
-    ]
-    assert planner_call["metadata"] == {
-        "graph_name": "plan-analyze",
-        "profile": "planning",
-        "binding": "planner",
-    }
-    planner_message = planner_call["messages"][1]
-    assert isinstance(planner_message, HumanMessage)
-    assert planner_message.content == "User request:\nGenerate a reusable workflow template."
-
-    analysis_call = fake_model.calls[1]
+    analysis_call = fake_model.calls[0]
     assert analysis_call["tags"] == [
         "graph:plan-analyze",
-        "profile:structured_output",
+        "profile:tool_calling",
         "binding:analysis",
         "analysis",
     ]
     assert analysis_call["metadata"] == {
         "graph_name": "plan-analyze",
-        "profile": "structured_output",
+        "profile": "tool_calling",
         "binding": "analysis",
     }
     analysis_message = analysis_call["messages"][1]
     assert isinstance(analysis_message, HumanMessage)
     assert analysis_message.content == (
         "User request:\nGenerate a reusable workflow template.\n\n"
-        "Draft plan:\n1. Inspect the request.\n2. Identify key constraints.\n\n"
+        "Draft plan:\n\n\n"
         "Provide the final analysis:"
     )
 
@@ -192,3 +186,73 @@ def test_plan_analyze_graph_rejects_invalid_query_type() -> None:
                 },
             )
         )
+
+
+def test_plan_analyze_graph_can_loop_through_tools_when_mcp_enabled() -> None:
+    @tool("sport_lookup")
+    def sport_lookup() -> str:
+        """Return a sport answer."""
+
+        return "sport-result"
+
+    class ToolLoopModel(FakeChatModel):
+        async def ainvoke(self, messages: list[object]) -> AIMessage:
+            self.calls.append(
+                {
+                    "messages": messages,
+                    "tags": list(self.tags),
+                    "metadata": dict(self.metadata),
+                }
+            )
+            if any(isinstance(message, ToolMessage) for message in messages):
+                return AIMessage(content="Integrated sport result.")
+            return AIMessage(
+                content="",
+                tool_calls=[
+                    {
+                        "name": "sport_lookup",
+                        "args": {},
+                        "id": "call-1",
+                        "type": "tool_call",
+                    }
+                ],
+            )
+
+    class Resolver:
+        async def resolve_tools(
+            self,
+            *,
+            graph_name: str,
+            server_names,
+            current_user,
+            request_headers,
+        ):
+            return [sport_lookup]
+
+    runtime = replace(PlanAnalyzeGraphBuilder().build(), mcp_servers=("sport",))
+    fake_model = ToolLoopModel()
+    graph_service = GraphService(
+        GraphRegistry({runtime.name: runtime}),
+        FakeLLMRouter(fake_model),
+        mcp_tool_resolver=Resolver(),
+    )
+
+    result = asyncio.run(
+        graph_service.invoke(
+            graph_name="plan-analyze",
+            payload={"query": "你好", "session_id": "demo-session"},
+            request_context=GraphRequestContext(
+                current_user=AuthenticatedUser(
+                    user_id="user-123",
+                    subject="user-123",
+                    claims={"sub": "user-123"},
+                    is_authenticated=True,
+                ),
+                request_headers={"Authorization": "Bearer test-token"},
+            ),
+        )
+    )
+
+    assert fake_model.bound_tool_names == ["sport_lookup"]
+    assert len(fake_model.calls) == 2
+    assert result.output.analysis == "Integrated sport result."

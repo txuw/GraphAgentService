@@ -22,12 +22,12 @@ class ToolAgentNodes:
         tools: Sequence[BaseTool] | None = None,
     ) -> None:
         self._llm_binding = llm_binding
-        self._tools = list(tools or build_toolset())
-        self._tool_node = ToolNode(self._tools)
+        self._local_tools = tuple(tools) if tools is not None else None
 
-    @property
-    def tool_node(self) -> ToolNode:
-        return self._tool_node
+    def _build_local_tools(self) -> list[BaseTool]:
+        if self._local_tools is not None:
+            return list(self._local_tools)
+        return build_toolset()
 
     def prepare(self, state: ToolAgentGraphState) -> ToolAgentGraphState:
         query = state.get("query", "").strip()
@@ -46,13 +46,26 @@ class ToolAgentNodes:
         state: ToolAgentGraphState,
         runtime: Runtime[GraphRunContext],
     ) -> ToolAgentGraphState:
+        tools = await self._resolve_tools(runtime)
         model = runtime.context.tool_model(
             binding=self._llm_binding,
-            tools=self._tools,
+            tools=tools,
             tags=("tool-calling",),
         )
         response = await model.ainvoke(self.build_messages(state.get("messages", [])))
         return {"messages": [response]}
+
+    async def tools(
+        self,
+        state: ToolAgentGraphState,
+        runtime: Runtime[GraphRunContext],
+    ) -> dict[str, list[ToolMessage]]:
+        tools = await self._resolve_tools(runtime)
+        tool_node = ToolNode(tools)
+        result = await tool_node.ainvoke(state, runtime=runtime)
+        if isinstance(result, dict):
+            return result
+        return {"messages": list(result)}
 
     def empty(self, state: ToolAgentGraphState) -> ToolAgentGraphState:
         return {
@@ -68,6 +81,21 @@ class ToolAgentNodes:
             "answer": answer,
             "tools_used": tools_used,
         }
+
+    async def _resolve_tools(
+        self,
+        runtime: Runtime[GraphRunContext],
+    ) -> list[BaseTool]:
+        resolver = runtime.context.mcp_tool_resolver
+        if resolver is None:
+            return self._build_local_tools()
+
+        return await resolver.resolve_tools(
+            graph_name=runtime.context.graph_name,
+            server_names=runtime.context.mcp_servers,
+            current_user=runtime.context.current_user,
+            request_headers=dict(runtime.context.request_headers),
+        )
 
     @staticmethod
     def build_messages(messages: Sequence[Any]) -> list[object]:
