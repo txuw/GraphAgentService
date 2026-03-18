@@ -196,6 +196,7 @@ uv run pytest -q
 ## 文档
 
 - 脚手架说明：`doc/wiki/scaffold.md`
+- Logto 鉴权：`doc/wiki/logto-auth.md`
 - 新手上手：`doc/tutorial/getting-started.md`
 
 ## Docker

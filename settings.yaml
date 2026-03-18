@@ -40,6 +40,12 @@ graph:
   enable_structured_output: true
   checkpoint_mode: memory
 
+logto:
+  enabled: false
+  issuer_uri:
+  audience:
+  jwk_set_uri:
+
 graphs:
   text-analysis:
     llm_bindings:

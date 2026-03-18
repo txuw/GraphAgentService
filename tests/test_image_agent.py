@@ -7,6 +7,7 @@ import pytest
 from fastapi.testclient import TestClient
 from langchain_core.messages import AIMessage, HumanMessage
 
+from overmindagent.common.auth import AuthenticatedUser
 from overmindagent.graphs.image_agent import ImageGraphBuilder
 from overmindagent.graphs.registry import GraphRegistry
 from overmindagent.main import create_app
@@ -52,8 +53,23 @@ class FakeLLMRouter:
         return self._model.with_config(tags=list(tags), metadata=dict(metadata or {}))
 
 
+class FakeAuthenticator:
+    def authenticate_request(self, request) -> AuthenticatedUser:
+        user = AuthenticatedUser(
+            user_id="user-123",
+            subject="user-123",
+            claims={"sub": "user-123"},
+            is_authenticated=True,
+        )
+        request.state.current_user = user
+        return user
+
+
 def test_graphs_api_lists_image_agent() -> None:
-    with TestClient(create_app()) as client:
+    app = create_app()
+    app.state.logto_authenticator = FakeAuthenticator()
+
+    with TestClient(app) as client:
         response = client.get("/api/graphs")
 
     assert response.status_code == 200
