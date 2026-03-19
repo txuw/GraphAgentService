@@ -3,7 +3,7 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [project]
-name = "overmindagent"
+name = "graphagentservice"
 version = "0.1.0"
 description = "FastAPI service managed with uv"
 readme = "README.md"
@@ -21,7 +21,7 @@ dependencies = [
 ]
 
 [project.scripts]
-overmindagent = "overmindagent.__main__:main"
+graphagentservice = "graphagentservice.__main__:main"
 
 [dependency-groups]
 dev = [
@@ -30,4 +30,4 @@ dev = [
 ]
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/overmindagent"]
+packages = ["src/graphagentservice"]

@@ -27,4 +27,4 @@ COPY settings.yaml ./
 
 EXPOSE 8000
 
-CMD ["overmindagent"]
+CMD ["graphagentservice"]

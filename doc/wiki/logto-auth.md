@@ -18,8 +18,8 @@
 也就是说，当前链路假设：
 
 1. 前端或其他客户端先向 Logto 获取 access token
-2. 客户端调用 OverMindAgent API 时携带 `Authorization: Bearer <token>`
-3. OverMindAgent 服务端只负责验证 token 与提取用户身份
+2. 客户端调用 GraphAgentService API 时携带 `Authorization: Bearer <token>`
+3. GraphAgentService 服务端只负责验证 token 与提取用户身份
 
 因此这条链路的核心是：
 
@@ -54,7 +54,7 @@ logto:
 
 ## 3. 代码结构
 
-当前鉴权代码集中在 `src/overmindagent/common/auth/`：
+当前鉴权代码集中在 `src/graphagentservice/common/auth/`：
 
 ```text
 common/auth/
@@ -73,9 +73,9 @@ common/auth/
 
 API 层相关接入点：
 
-- `src/overmindagent/main.py`
-- `src/overmindagent/api/router.py`
-- `src/overmindagent/api/dependencies.py`
+- `src/graphagentservice/main.py`
+- `src/graphagentservice/api/router.py`
+- `src/graphagentservice/api/dependencies.py`
 
 ## 4. 应用生命周期
 

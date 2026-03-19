@@ -7,11 +7,11 @@ import pytest
 from fastapi.testclient import TestClient
 from langchain_core.messages import AIMessage, HumanMessage
 
-from overmindagent.common.auth import AuthenticatedUser
-from overmindagent.graphs.image_agent import ImageGraphBuilder
-from overmindagent.graphs.registry import GraphRegistry
-from overmindagent.main import create_app
-from overmindagent.services.graph_service import GraphPayloadValidationError, GraphService
+from graphagentservice.common.auth import AuthenticatedUser
+from graphagentservice.graphs.image_agent import ImageGraphBuilder
+from graphagentservice.graphs.registry import GraphRegistry
+from graphagentservice.main import create_app
+from graphagentservice.services.graph_service import GraphPayloadValidationError, GraphService
 
 
 class FakeChatModel:

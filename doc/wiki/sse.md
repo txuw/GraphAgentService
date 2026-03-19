@@ -1,11 +1,11 @@
-# OverMindAgent SSE 链路说明
+# GraphAgentService SSE 链路说明
 
 本文档说明当前面向前端的 SSE 交互链路，重点解释：
 
 - 接口层如何做 Convert
 - `SseConnectionRegistry` 如何注册和管理连接
-- `src/overmindagent/services/sse.py` 的主要职责
-- `src/overmindagent/services/chat_stream_service.py` 的主要职责
+- `src/graphagentservice/services/sse.py` 的主要职责
+- `src/graphagentservice/services/chat_stream_service.py` 的主要职责
 
 目标是让前端消费到稳定、语义清晰的事件协议，同时尽量不改动内部 graph、node 和 LLM 逻辑。
 
@@ -235,7 +235,7 @@ Convert 后：
 
 ## 5. 如何 Registry SSE
 
-SSE 注册与管理都放在 `src/overmindagent/services/sse.py`。
+SSE 注册与管理都放在 `src/graphagentservice/services/sse.py`。
 
 ### 连接主键
 
@@ -338,7 +338,7 @@ await sse_connection_registry.send_connected_event(connection)
 
 ## 6. `sse.py` 的主要职责
 
-`src/overmindagent/services/sse.py` 主要负责四件事。
+`src/graphagentservice/services/sse.py` 主要负责四件事。
 
 ### 1. 定义 SSE 数据结构
 
@@ -382,7 +382,7 @@ await sse_connection_registry.send_connected_event(connection)
 
 ## 7. `chat_stream_service.py` 的主要职责
 
-`src/overmindagent/services/chat_stream_service.py` 负责的是“执行编排 + 协议转换”。
+`src/graphagentservice/services/chat_stream_service.py` 负责的是“执行编排 + 协议转换”。
 
 主要职责如下。
 

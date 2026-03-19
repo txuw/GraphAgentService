@@ -1,5 +1,5 @@
-from overmindagent.__main__ import main
-from overmindagent.main import app
+from graphagentservice.__main__ import main
+from graphagentservice.main import app
 
 __all__ = ["app"]
 

@@ -1,4 +1,4 @@
-# OverMindAgent 新手上手
+# GraphAgentService 新手上手
 
 这是一份面向当前代码库的快速上手文档。目标很简单：
 
@@ -179,13 +179,13 @@ graphs:
 开发模式：
 
 ```powershell
-uv run uvicorn overmindagent.main:app --reload
+uv run uvicorn graphagentservice.main:app --reload
 ```
 
 或直接通过项目入口：
 
 ```powershell
-uv run overmindagent
+uv run graphagentservice
 ```
 
 启动后先检查健康接口：
@@ -282,7 +282,7 @@ curl -X POST "http://127.0.0.1:8000/api/graphs/tool-agent/invoke" `
 
 当前它的工具来源是：
 
-- 本地默认工具：`src/overmindagent/tools/`
+- 本地默认工具：`src/graphagentservice/tools/`
 - 如果配置了 `mcp_servers`，还会动态合并远端 MCP 工具
 
 工具冲突规则是：
@@ -329,16 +329,16 @@ START -> analyze <-> tools -> END
 
 如果你第一次读这个项目，建议按这个顺序看：
 
-1. `src/overmindagent/main.py`
-2. `src/overmindagent/api/routes/graphs.py`
-3. `src/overmindagent/services/graph_service.py`
-4. `src/overmindagent/graphs/registry.py`
-5. `src/overmindagent/graphs/runtime.py`
-6. `src/overmindagent/graphs/text_analysis/`
-7. `src/overmindagent/graphs/tool_agent/`
-8. `src/overmindagent/graphs/plan_analyze/`
-9. `src/overmindagent/mcp/`
-10. `src/overmindagent/llm/`
+1. `src/graphagentservice/main.py`
+2. `src/graphagentservice/api/routes/graphs.py`
+3. `src/graphagentservice/services/graph_service.py`
+4. `src/graphagentservice/graphs/registry.py`
+5. `src/graphagentservice/graphs/runtime.py`
+6. `src/graphagentservice/graphs/text_analysis/`
+7. `src/graphagentservice/graphs/tool_agent/`
+8. `src/graphagentservice/graphs/plan_analyze/`
+9. `src/graphagentservice/mcp/`
+10. `src/graphagentservice/llm/`
 
 建议的理解顺序是：
 
@@ -375,7 +375,7 @@ START -> analyze <-> tools -> END
 
 通常需要做这些事：
 
-1. 在 `src/overmindagent/llm/factory.py` 增加 builder
+1. 在 `src/graphagentservice/llm/factory.py` 增加 builder
 2. 让 builder 返回对应的 `BaseChatModel`
 3. 补 provider 对应测试
 

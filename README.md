@@ -1,4 +1,4 @@
-# OverMindAgent
+# GraphAgentService
 
 基于 `FastAPI + LangGraph` 的服务端脚手架，使用 `uv` 管理依赖，配置采用 `Dynaconf` 的 `settings.yaml + .env + 环境变量` 组合。
 
@@ -21,13 +21,13 @@
 ```text
 .
 ├── doc/
-├── src/overmindagent/api      # FastAPI 路由与依赖
-├── src/overmindagent/common   # 配置与公共基础设施
-├── src/overmindagent/graphs   # Graph builder / registry / runtime / state
-├── src/overmindagent/llm      # ChatModel profile / router / factory
-├── src/overmindagent/tools    # 可复用工具定义与注册
-├── src/overmindagent/schemas  # Pydantic 输入输出模型
-├── src/overmindagent/services # Graph 编排服务
+├── src/graphagentservice/api      # FastAPI 路由与依赖
+├── src/graphagentservice/common   # 配置与公共基础设施
+├── src/graphagentservice/graphs   # Graph builder / registry / runtime / state
+├── src/graphagentservice/llm      # ChatModel profile / router / factory
+├── src/graphagentservice/tools    # 可复用工具定义与注册
+├── src/graphagentservice/schemas  # Pydantic 输入输出模型
+├── src/graphagentservice/services # Graph 编排服务
 ├── tests                      # 测试
 ├── settings.yaml              # 默认配置
 └── .env.example               # 本地覆盖示例
@@ -69,13 +69,13 @@ uv sync
 启动服务：
 
 ```bash
-uv run overmindagent
+uv run graphagentservice
 ```
 
 开发模式：
 
 ```bash
-uv run uvicorn overmindagent.main:app --reload
+uv run uvicorn graphagentservice.main:app --reload
 ```
 
 ## 配置约定
@@ -204,13 +204,13 @@ uv run pytest -q
 构建镜像：
 
 ```bash
-docker build -t overmindagent:local .
+docker build -t graphagentservice:local .
 ```
 
 通过 `.env` 注入配置运行：
 
 ```bash
-docker run --rm -p 8000:8000 --env-file .env overmindagent:local
+docker run --rm -p 8000:8000 --env-file .env graphagentservice:local
 ```
 
 镜像内默认只包含 `/app/settings.yaml`。如果要通过文件覆盖配置，请挂载到 `/app/.env` 或 `/app/settings.yaml`；单纯挂载到 `/config` 不会自动生效。
@@ -222,9 +222,9 @@ docker run --rm -p 8000:8000 --env-file .env overmindagent:local
 ```yaml
 envFrom:
   - configMapRef:
-      name: over-mind-agent-config
+      name: graph-agent-service-config
   - secretRef:
-      name: over-mind-agent-secret
+      name: graph-agent-service-secret
 ```
 
 一个最小示例：
@@ -233,7 +233,7 @@ envFrom:
 apiVersion: v1
 kind: ConfigMap
 metadata:
-  name: over-mind-agent-config
+  name: graph-agent-service-config
 data:
   APP__PORT: "8000"
   LLM__DEFAULT_PROFILE: default
@@ -247,7 +247,7 @@ data:
 apiVersion: v1
 kind: Secret
 metadata:
-  name: over-mind-agent-secret
+  name: graph-agent-service-secret
 type: Opaque
 stringData:
   LLM__PROFILES__DEFAULT__API_KEY: your-api-key

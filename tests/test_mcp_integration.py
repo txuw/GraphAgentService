@@ -10,14 +10,14 @@ from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 from langchain_core.tools import tool
 from pydantic import BaseModel
 
-from overmindagent.common import create_checkpoint_provider, get_settings
-from overmindagent.common.auth import AuthenticatedUser
-from overmindagent.graphs.registry import GraphRegistry, create_graph_registry
-from overmindagent.graphs.runtime import GraphRunContext, GraphRuntime
-from overmindagent.graphs.tool_agent import ToolAgentGraphBuilder
-from overmindagent.graphs.tool_agent.nodes import ToolAgentNodes
-from overmindagent.main import create_app
-from overmindagent.mcp import (
+from graphagentservice.common import create_checkpoint_provider, get_settings
+from graphagentservice.common.auth import AuthenticatedUser
+from graphagentservice.graphs.registry import GraphRegistry, create_graph_registry
+from graphagentservice.graphs.runtime import GraphRunContext, GraphRuntime
+from graphagentservice.graphs.tool_agent import ToolAgentGraphBuilder
+from graphagentservice.graphs.tool_agent.nodes import ToolAgentNodes
+from graphagentservice.main import create_app
+from graphagentservice.mcp import (
     MCPClientFactory,
     MCPConfigurationError,
     MCPConnectionSettings,
@@ -26,8 +26,8 @@ from overmindagent.mcp import (
     MCPToolResolutionError,
     MCPToolResolver,
 )
-from overmindagent.services.chat_stream_service import ChatStreamService
-from overmindagent.services.graph_service import (
+from graphagentservice.services.chat_stream_service import ChatStreamService
+from graphagentservice.services.graph_service import (
     GraphRequestContext,
     GraphService,
     GraphStreamEvent,
@@ -221,7 +221,7 @@ def test_mcp_header_forwarder_prefers_request_authorization() -> None:
 def test_mcp_client_factory_cache_isolated_by_authorization(monkeypatch: pytest.MonkeyPatch) -> None:
     FakeMultiServerMCPClient.created_configs.clear()
     monkeypatch.setattr(
-        "overmindagent.mcp.client.load_multi_server_mcp_client",
+        "graphagentservice.mcp.client.load_multi_server_mcp_client",
         lambda: FakeMultiServerMCPClient,
     )
 

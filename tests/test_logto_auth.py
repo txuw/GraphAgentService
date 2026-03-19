@@ -4,9 +4,9 @@ from fastapi import Depends, Request
 from fastapi.testclient import TestClient
 from jwt.exceptions import InvalidAudienceError, InvalidIssuerError
 
-from overmindagent.api.dependencies import get_current_user, require_current_user
-from overmindagent.common.auth import AuthenticatedUser, LogtoAuthenticator
-from overmindagent.main import create_app
+from graphagentservice.api.dependencies import get_current_user, require_current_user
+from graphagentservice.common.auth import AuthenticatedUser, LogtoAuthenticator
+from graphagentservice.main import create_app
 
 ES384_TEST_TOKEN = (
     "eyJhbGciOiJFUzM4NCIsInR5cCI6ImF0K2p3dCIsImtpZCI6InRlc3Qta2lkIn0."

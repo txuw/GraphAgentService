@@ -1,6 +1,6 @@
 # Runtime 与 Binding 机制
 
-本文档聚焦解释 OverMindAgent 中 `Runtime / Binding / Alias / Profile` 之间的关系，以及为什么项目要把模型调用入口统一收口到 runtime 层。
+本文档聚焦解释 GraphAgentService 中 `Runtime / Binding / Alias / Profile` 之间的关系，以及为什么项目要把模型调用入口统一收口到 runtime 层。
 
 ## 1. 一句话概括
 

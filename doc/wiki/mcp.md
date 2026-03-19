@@ -1,6 +1,6 @@
 # MCP 接入说明
 
-本文整理 OverMindAgent 当前版本的 MCP 接入方式、最小可用接法，以及这次实际调试中踩到的坑。
+本文整理 GraphAgentService 当前版本的 MCP 接入方式、最小可用接法，以及这次实际调试中踩到的坑。
 
 目标不是泛泛介绍 MCP 概念，而是回答下面几个问题：
 
@@ -36,22 +36,22 @@ HTTP 请求
 
 MCP 相关代码主要在以下位置：
 
-- `src/overmindagent/mcp/models.py`
-- `src/overmindagent/mcp/headers.py`
-- `src/overmindagent/mcp/client.py`
-- `src/overmindagent/mcp/resolver.py`
+- `src/graphagentservice/mcp/models.py`
+- `src/graphagentservice/mcp/headers.py`
+- `src/graphagentservice/mcp/client.py`
+- `src/graphagentservice/mcp/resolver.py`
 
 请求上下文透传在这里：
 
-- `src/overmindagent/services/graph_service.py`
-- `src/overmindagent/api/routes/graphs.py`
-- `src/overmindagent/api/routes/chat.py`
-- `src/overmindagent/services/chat_stream_service.py`
+- `src/graphagentservice/services/graph_service.py`
+- `src/graphagentservice/api/routes/graphs.py`
+- `src/graphagentservice/api/routes/chat.py`
+- `src/graphagentservice/services/chat_stream_service.py`
 
 Graph 侧的参考实现有两个：
 
-- `src/overmindagent/graphs/tool_agent/`
-- `src/overmindagent/graphs/plan_analyze/`
+- `src/graphagentservice/graphs/tool_agent/`
+- `src/graphagentservice/graphs/plan_analyze/`
 
 ## 3. 配置方式
 
@@ -408,7 +408,7 @@ START -> analyze <-> tools -> END
 
 ## 10. 当前版本的一句话原则
 
-在 OverMindAgent 里接 MCP，可以记成一句话：
+在 GraphAgentService 里接 MCP，可以记成一句话：
 
 ```text
 Graph 决定要接哪些 MCP server，

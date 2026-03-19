@@ -9,11 +9,11 @@ from fastapi.testclient import TestClient
 from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 from langchain_core.tools import tool
 
-from overmindagent.common.auth import AuthenticatedUser
-from overmindagent.graphs.plan_analyze import PlanAnalyzeGraphBuilder
-from overmindagent.graphs.registry import GraphRegistry
-from overmindagent.main import create_app
-from overmindagent.services.graph_service import (
+from graphagentservice.common.auth import AuthenticatedUser
+from graphagentservice.graphs.plan_analyze import PlanAnalyzeGraphBuilder
+from graphagentservice.graphs.registry import GraphRegistry
+from graphagentservice.main import create_app
+from graphagentservice.services.graph_service import (
     GraphPayloadValidationError,
     GraphRequestContext,
     GraphService,
