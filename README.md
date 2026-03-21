@@ -272,4 +272,4 @@ stringData:
 - `ACR_PASSWORD`
 - `GIT_PAT`
 
-----
+-----
