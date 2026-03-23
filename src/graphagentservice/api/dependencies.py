@@ -3,6 +3,7 @@ from __future__ import annotations
 from fastapi import Depends, HTTPException, Request
 
 from graphagentservice.common.auth import AuthenticatedUser, AuthenticationError, LogtoAuthenticator
+from graphagentservice.common.trace import resolve_request_trace_context
 from graphagentservice.services.chat_stream_service import ChatStreamService
 from graphagentservice.services.graph_service import GraphRequestContext, GraphService
 from graphagentservice.services.sse import SseConnectionRegistry
@@ -45,7 +46,9 @@ def get_current_user(request: Request) -> AuthenticatedUser:
 
 
 def build_graph_request_context(request: Request) -> GraphRequestContext:
+    trace_context = resolve_request_trace_context(request.headers)
     return GraphRequestContext(
         current_user=get_current_user(request),
-        request_headers=dict(request.headers),
+        trace_id=trace_context.trace_id,
+        request_headers=trace_context.request_headers,
     )

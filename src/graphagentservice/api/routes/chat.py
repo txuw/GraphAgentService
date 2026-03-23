@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from uuid import uuid4
 
-from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request, status
+from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request, Response, status
 from fastapi.responses import StreamingResponse
 
 from graphagentservice.api.dependencies import (
@@ -10,6 +10,7 @@ from graphagentservice.api.dependencies import (
     get_chat_stream_service,
     get_sse_connection_registry,
 )
+from graphagentservice.common.trace import build_trace_response_headers
 from graphagentservice.schemas.api import ChatExecuteRequest, ChatExecuteResponse
 from graphagentservice.services.chat_stream_service import ChatStreamService
 from graphagentservice.services.sse import (
@@ -58,9 +59,12 @@ async def connect_sse(
 @router.post("/chat/execute", response_model=ChatExecuteResponse)
 async def execute_chat(
     request: Request,
+    response: Response,
     body: ChatExecuteRequest,
     chat_stream_service: ChatStreamService = Depends(get_chat_stream_service),
 ) -> ChatExecuteResponse:
+    request_context = build_graph_request_context(request)
+    trace_headers = build_trace_response_headers(request_context.trace_id)
     try:
         accepted = await chat_stream_service.execute(
             graph_name=body.graph_name,
@@ -68,11 +72,16 @@ async def execute_chat(
             session_id=body.session_id,
             page_id=body.page_id,
             request_id=body.request_id,
-            request_context=build_graph_request_context(request),
+            request_context=request_context,
         )
     except SseConnectionNotFoundError as exc:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=str(exc),
+            headers=trace_headers,
+        ) from exc
 
+    response.headers.update(trace_headers)
     return ChatExecuteResponse(
         graph_name=accepted.graph_name,
         session_id=accepted.session_id,

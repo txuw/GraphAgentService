@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING, Any
 from pydantic import BaseModel
 
 from graphagentservice.common.auth import AuthenticatedUser
+from graphagentservice.common.trace import TRACE_ID_HEADER
 from graphagentservice.llm.router import LLMRouter
 
 if TYPE_CHECKING:
@@ -19,6 +20,7 @@ class GraphRunContext:
     graph_name: str
     llm_bindings: Mapping[str, str] = field(default_factory=dict)
     current_user: AuthenticatedUser = field(default_factory=AuthenticatedUser.anonymous)
+    trace_id: str = ""
     request_headers: Mapping[str, str] = field(default_factory=dict)
     mcp_tool_resolver: MCPToolResolver | None = None
     mcp_servers: tuple[str, ...] = ()
@@ -47,16 +49,22 @@ class GraphRunContext:
         base_metadata = {
             "graph_name": self.graph_name,
             "profile": resolved_profile.name,
+            "trace_id": self.trace_id,
         }
         if binding:
             base_metadata["binding"] = binding
         if metadata:
             base_metadata.update(dict(metadata))
 
+        default_headers = None
+        if self.trace_id:
+            default_headers = {TRACE_ID_HEADER: self.trace_id}
+
         return self.llm_router.create_model(
             profile=resolved_profile.name,
             tags=tuple(base_tags),
             metadata=base_metadata,
+            default_headers=default_headers,
         )
 
     def structured_model(

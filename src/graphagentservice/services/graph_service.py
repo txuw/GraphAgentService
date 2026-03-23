@@ -10,6 +10,7 @@ from langchain_core.messages import message_to_dict
 from pydantic import BaseModel, ValidationError
 
 from graphagentservice.common.auth import AuthenticatedUser
+from graphagentservice.common.trace import TRACE_ID_HEADER, resolve_request_trace_context
 from graphagentservice.graphs.registry import GraphRegistry
 from graphagentservice.graphs.runtime import GraphRunContext, GraphRuntime
 from graphagentservice.llm.router import LLMRouter
@@ -32,6 +33,7 @@ class GraphStreamEvent:
 @dataclass(frozen=True, slots=True)
 class GraphRequestContext:
     current_user: AuthenticatedUser
+    trace_id: str
     request_headers: dict[str, str]
 
 
@@ -137,15 +139,29 @@ class GraphService:
         *,
         request_context: GraphRequestContext | None = None,
     ) -> GraphRunContext:
-        resolved_request_context = request_context or GraphRequestContext(
-            current_user=AuthenticatedUser.anonymous(),
-            request_headers={},
-        )
+        if request_context is None:
+            trace_context = resolve_request_trace_context({})
+            resolved_request_context = GraphRequestContext(
+                current_user=AuthenticatedUser.anonymous(),
+                trace_id=trace_context.trace_id,
+                request_headers=trace_context.request_headers,
+            )
+        else:
+            request_headers = dict(request_context.request_headers)
+            if request_context.trace_id:
+                request_headers[TRACE_ID_HEADER] = request_context.trace_id
+            trace_context = resolve_request_trace_context(request_headers)
+            resolved_request_context = GraphRequestContext(
+                current_user=request_context.current_user,
+                trace_id=trace_context.trace_id,
+                request_headers=trace_context.request_headers,
+            )
         return GraphRunContext(
             llm_router=self._llm_router,
             graph_name=runtime.name,
             llm_bindings=runtime.llm_bindings,
             current_user=resolved_request_context.current_user,
+            trace_id=resolved_request_context.trace_id,
             request_headers=resolved_request_context.request_headers,
             mcp_tool_resolver=self._mcp_tool_resolver,
             mcp_servers=runtime.mcp_servers,
