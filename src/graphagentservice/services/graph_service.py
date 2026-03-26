@@ -61,32 +61,36 @@ class GraphService:
     async def invoke(
         self,
         graph_name: str,
-        payload: dict[str, object],
+        payload: BaseModel | dict[str, object],
+        session_id: str | None = None,
         request_context: GraphRequestContext | None = None,
     ) -> GraphInvocationResult:
         runtime = self._registry.get(graph_name)
-        graph_input = self._validate_payload(runtime, payload)
-        session_id = self._resolve_session_id(payload)
+        payload_dict = self._payload_to_dict(payload)
+        graph_input = self._validate_payload(runtime, payload_dict)
+        resolved_session_id = self._resolve_session_id(session_id=session_id, payload=payload_dict)
         state = await runtime.graph.ainvoke(
             graph_input.model_dump(),
-            config={"configurable": {"thread_id": session_id}},
+            config={"configurable": {"thread_id": resolved_session_id}},
             context=self._build_context(runtime, request_context=request_context),
         )
         return GraphInvocationResult(
             graph_name=graph_name,
-            session_id=session_id,
+            session_id=resolved_session_id,
             output=runtime.output_model.model_validate(state),
         )
 
     async def stream(
         self,
         graph_name: str,
-        payload: dict[str, object],
+        payload: BaseModel | dict[str, object],
+        session_id: str | None = None,
         request_context: GraphRequestContext | None = None,
     ) -> AsyncIterator[str]:
         async for event in self.stream_events(
             graph_name=graph_name,
             payload=payload,
+            session_id=session_id,
             request_context=request_context,
         ):
             yield self._to_sse(event.event, event.data)
@@ -94,21 +98,23 @@ class GraphService:
     async def stream_events(
         self,
         graph_name: str,
-        payload: dict[str, object],
+        payload: BaseModel | dict[str, object],
+        session_id: str | None = None,
         request_context: GraphRequestContext | None = None,
     ) -> AsyncIterator[GraphStreamEvent]:
         runtime = self._registry.get(graph_name)
-        graph_input = self._validate_payload(runtime, payload)
-        session_id = self._resolve_session_id(payload)
+        payload_dict = self._payload_to_dict(payload)
+        graph_input = self._validate_payload(runtime, payload_dict)
+        resolved_session_id = self._resolve_session_id(session_id=session_id, payload=payload_dict)
 
         yield GraphStreamEvent(
             event="session",
-            data={"graph_name": graph_name, "session_id": session_id},
+            data={"graph_name": graph_name, "session_id": resolved_session_id},
         )
         final_state: dict[str, object] | None = None
         async for chunk in runtime.graph.astream(
             graph_input.model_dump(),
-            config={"configurable": {"thread_id": session_id}},
+            config={"configurable": {"thread_id": resolved_session_id}},
             context=self._build_context(runtime, request_context=request_context),
             stream_mode=list(runtime.stream_modes),
             version="v2",
@@ -124,13 +130,15 @@ class GraphService:
 
         output = runtime.output_model.model_validate(final_state or {})
         yield GraphStreamEvent(event="result", data=output.model_dump())
-        yield GraphStreamEvent(event="completed", data={"session_id": session_id})
+        yield GraphStreamEvent(event="completed", data={"session_id": resolved_session_id})
 
     @staticmethod
-    def _resolve_session_id(payload: dict[str, object]) -> str:
-        session_id = payload.get("session_id")
+    def _resolve_session_id(*, session_id: str | None, payload: dict[str, object]) -> str:
         if isinstance(session_id, str) and session_id:
             return session_id
+        payload_session_id = payload.get("session_id")
+        if isinstance(payload_session_id, str) and payload_session_id:
+            return payload_session_id
         return uuid4().hex
 
     def _build_context(
@@ -178,6 +186,14 @@ class GraphService:
                 graph_name=runtime.name,
                 errors=exc.errors(),
             ) from exc
+
+    @staticmethod
+    def _payload_to_dict(payload: BaseModel | dict[str, object]) -> dict[str, object]:
+        if isinstance(payload, BaseModel):
+            serialized = payload.model_dump()
+        else:
+            serialized = dict(payload)
+        return {str(key): value for key, value in serialized.items()}
 
     @staticmethod
     def _serialize_stream_chunk(chunk: dict[str, object]) -> dict[str, object]:

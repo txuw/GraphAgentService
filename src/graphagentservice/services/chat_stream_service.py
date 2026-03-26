@@ -354,12 +354,12 @@ class ChatStreamService:
             request_id=request_id,
         )
         graph_payload = dict(payload)
-        graph_payload["session_id"] = session_id
 
         try:
             async for event in self._graph_service.stream_events(
                 graph_name=graph_name,
                 payload=graph_payload,
+                session_id=session_id,
                 request_context=request_context,
             ):
                 for adapted_event in adapter.adapt(event):

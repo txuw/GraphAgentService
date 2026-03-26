@@ -4,6 +4,7 @@ from uuid import uuid4
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request, Response, status
 from fastapi.responses import StreamingResponse
+from pydantic import BaseModel
 
 from graphagentservice.api.dependencies import (
     build_graph_request_context,
@@ -11,7 +12,21 @@ from graphagentservice.api.dependencies import (
     get_sse_connection_registry,
 )
 from graphagentservice.common.trace import build_trace_response_headers
-from graphagentservice.schemas.api import ChatExecuteRequest, ChatExecuteResponse
+from graphagentservice.schemas.analysis import TextAnalysisRequest
+from graphagentservice.schemas.api import (
+    ChatExecuteRequest,
+    ChatExecuteRequestBase,
+    ChatExecuteResponse,
+    ImageAgentChatExecuteRequest,
+    ImageCaloriesChatExecuteRequest,
+    PlanAnalyzeChatExecuteRequest,
+    TextAnalysisChatExecuteRequest,
+    ToolAgentChatExecuteRequest,
+)
+from graphagentservice.schemas.image import ImageAgentRequest
+from graphagentservice.schemas.image_calories import ImageCaloriesRequest
+from graphagentservice.schemas.plan_analyze import PlanAnalyzeRequest
+from graphagentservice.schemas.tool_agent import ToolAgentRequest
 from graphagentservice.services.chat_stream_service import ChatStreamService
 from graphagentservice.services.sse import (
     SseConnectionNotFoundError,
@@ -19,6 +34,12 @@ from graphagentservice.services.sse import (
 )
 
 router = APIRouter(tags=["chat"])
+
+TEXT_ANALYSIS_GRAPH = "text-analysis"
+PLAN_ANALYZE_GRAPH = "plan-analyze"
+TOOL_AGENT_GRAPH = "tool-agent"
+IMAGE_AGENT_GRAPH = "image-agent"
+IMAGE_ANALYZE_CALORIES_GRAPH = "image-analyze-calories"
 
 
 @router.get("/sse/connect")
@@ -56,7 +77,116 @@ async def connect_sse(
     )
 
 
-@router.post("/chat/execute", response_model=ChatExecuteResponse)
+@router.post(
+    "/chat/text-analysis/execute",
+    response_model=ChatExecuteResponse,
+    operation_id="executeTextAnalysisChat",
+)
+async def execute_text_analysis_chat(
+    request: Request,
+    response: Response,
+    body: TextAnalysisChatExecuteRequest,
+    chat_stream_service: ChatStreamService = Depends(get_chat_stream_service),
+) -> ChatExecuteResponse:
+    return await _execute_chat(
+        request=request,
+        response=response,
+        graph_name=TEXT_ANALYSIS_GRAPH,
+        body=body,
+        input_model=TextAnalysisRequest,
+        chat_stream_service=chat_stream_service,
+    )
+
+
+@router.post(
+    "/chat/plan-analyze/execute",
+    response_model=ChatExecuteResponse,
+    operation_id="executePlanAnalyzeChat",
+)
+async def execute_plan_analyze_chat(
+    request: Request,
+    response: Response,
+    body: PlanAnalyzeChatExecuteRequest,
+    chat_stream_service: ChatStreamService = Depends(get_chat_stream_service),
+) -> ChatExecuteResponse:
+    return await _execute_chat(
+        request=request,
+        response=response,
+        graph_name=PLAN_ANALYZE_GRAPH,
+        body=body,
+        input_model=PlanAnalyzeRequest,
+        chat_stream_service=chat_stream_service,
+    )
+
+
+@router.post(
+    "/chat/tool-agent/execute",
+    response_model=ChatExecuteResponse,
+    operation_id="executeToolAgentChat",
+)
+async def execute_tool_agent_chat(
+    request: Request,
+    response: Response,
+    body: ToolAgentChatExecuteRequest,
+    chat_stream_service: ChatStreamService = Depends(get_chat_stream_service),
+) -> ChatExecuteResponse:
+    return await _execute_chat(
+        request=request,
+        response=response,
+        graph_name=TOOL_AGENT_GRAPH,
+        body=body,
+        input_model=ToolAgentRequest,
+        chat_stream_service=chat_stream_service,
+    )
+
+
+@router.post(
+    "/chat/image-agent/execute",
+    response_model=ChatExecuteResponse,
+    operation_id="executeImageAgentChat",
+)
+async def execute_image_agent_chat(
+    request: Request,
+    response: Response,
+    body: ImageAgentChatExecuteRequest,
+    chat_stream_service: ChatStreamService = Depends(get_chat_stream_service),
+) -> ChatExecuteResponse:
+    return await _execute_chat(
+        request=request,
+        response=response,
+        graph_name=IMAGE_AGENT_GRAPH,
+        body=body,
+        input_model=ImageAgentRequest,
+        chat_stream_service=chat_stream_service,
+    )
+
+
+@router.post(
+    "/chat/image-analyze-calories/execute",
+    response_model=ChatExecuteResponse,
+    operation_id="executeImageAnalyzeCaloriesChat",
+)
+async def execute_image_analyze_calories_chat(
+    request: Request,
+    response: Response,
+    body: ImageCaloriesChatExecuteRequest,
+    chat_stream_service: ChatStreamService = Depends(get_chat_stream_service),
+) -> ChatExecuteResponse:
+    return await _execute_chat(
+        request=request,
+        response=response,
+        graph_name=IMAGE_ANALYZE_CALORIES_GRAPH,
+        body=body,
+        input_model=ImageCaloriesRequest,
+        chat_stream_service=chat_stream_service,
+    )
+
+
+@router.post(
+    "/chat/execute",
+    response_model=ChatExecuteResponse,
+    include_in_schema=False,
+)
 async def execute_chat(
     request: Request,
     response: Response,
@@ -69,6 +199,43 @@ async def execute_chat(
         accepted = await chat_stream_service.execute(
             graph_name=body.graph_name,
             payload=body.input,
+            session_id=body.session_id,
+            page_id=body.page_id,
+            request_id=body.request_id,
+            request_context=request_context,
+        )
+    except SseConnectionNotFoundError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=str(exc),
+            headers=trace_headers,
+        ) from exc
+
+    response.headers.update(trace_headers)
+    return ChatExecuteResponse(
+        graph_name=accepted.graph_name,
+        session_id=accepted.session_id,
+        page_id=accepted.page_id,
+        request_id=accepted.request_id,
+    )
+
+
+async def _execute_chat(
+    *,
+    request: Request,
+    response: Response,
+    graph_name: str,
+    body: ChatExecuteRequestBase,
+    input_model: type[BaseModel],
+    chat_stream_service: ChatStreamService,
+) -> ChatExecuteResponse:
+    request_context = build_graph_request_context(request)
+    trace_headers = build_trace_response_headers(request_context.trace_id)
+    payload = input_model.model_validate(body.model_dump()).model_dump()
+    try:
+        accepted = await chat_stream_service.execute(
+            graph_name=graph_name,
+            payload=payload,
             session_id=body.session_id,
             page_id=body.page_id,
             request_id=body.request_id,
