@@ -39,6 +39,9 @@ graph:
   debug: false
   enable_structured_output: true
   checkpoint_mode: memory
+  checkpoint:
+    postgres:
+      url: null
 
 tools:
   time:

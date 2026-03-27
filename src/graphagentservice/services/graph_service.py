@@ -50,10 +50,12 @@ class GraphService:
         registry: GraphRegistry,
         llm_router: LLMRouter,
         mcp_tool_resolver: MCPToolResolver | None = None,
+        checkpoint_namespace_prefix: str = "",
     ) -> None:
         self._registry = registry
         self._llm_router = llm_router
         self._mcp_tool_resolver = mcp_tool_resolver
+        self._checkpoint_namespace_prefix = checkpoint_namespace_prefix.strip()
 
     def list_graphs(self) -> tuple[GraphRuntime, ...]:
         return self._registry.list_runtimes()
@@ -71,7 +73,10 @@ class GraphService:
         resolved_session_id = self._resolve_session_id(session_id=session_id, payload=payload_dict)
         state = await runtime.graph.ainvoke(
             graph_input.model_dump(),
-            config={"configurable": {"thread_id": resolved_session_id}},
+            config=self._build_graph_config(
+                runtime=runtime,
+                session_id=resolved_session_id,
+            ),
             context=self._build_context(runtime, request_context=request_context),
         )
         return GraphInvocationResult(
@@ -114,7 +119,10 @@ class GraphService:
         final_state: dict[str, object] | None = None
         async for chunk in runtime.graph.astream(
             graph_input.model_dump(),
-            config={"configurable": {"thread_id": resolved_session_id}},
+            config=self._build_graph_config(
+                runtime=runtime,
+                session_id=resolved_session_id,
+            ),
             context=self._build_context(runtime, request_context=request_context),
             stream_mode=list(runtime.stream_modes),
             version="v2",
@@ -174,6 +182,32 @@ class GraphService:
             mcp_tool_resolver=self._mcp_tool_resolver,
             mcp_servers=runtime.mcp_servers,
         )
+
+    def _build_graph_config(
+        self,
+        *,
+        runtime: GraphRuntime,
+        session_id: str,
+    ) -> dict[str, dict[str, str]]:
+        return {
+            "configurable": {
+                "thread_id": self._build_thread_id(
+                    graph_name=runtime.name,
+                    session_id=session_id,
+                ),
+                "checkpoint_ns": self._build_checkpoint_namespace(runtime.name),
+            }
+        }
+
+    def _build_thread_id(self, *, graph_name: str, session_id: str) -> str:
+        if not self._checkpoint_namespace_prefix:
+            return f"{graph_name}:{session_id}"
+        return f"{self._checkpoint_namespace_prefix}:{graph_name}:{session_id}"
+
+    def _build_checkpoint_namespace(self, graph_name: str) -> str:
+        if not self._checkpoint_namespace_prefix:
+            return graph_name
+        return f"{self._checkpoint_namespace_prefix}:{graph_name}"
 
     @staticmethod
     def _validate_payload(runtime: GraphRuntime, payload: dict[str, object]) -> BaseModel:

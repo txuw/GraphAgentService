@@ -17,26 +17,34 @@ def create_app() -> FastAPI:
     logto_authenticator = LogtoAuthenticator(settings.get("logto", {}))
     mcp_settings = MCPSettings.model_validate(settings.get("mcp", {}))
     mcp_tool_resolver = MCPToolResolver(mcp_settings)
-    graph_registry = create_graph_registry(
-        settings=settings,
-        checkpoint_provider=checkpoint_provider,
-    )
-    graph_service = GraphService(
-        graph_registry,
-        llm_router,
-        mcp_tool_resolver=mcp_tool_resolver,
-    )
     sse_connection_registry = SseConnectionRegistry()
-    chat_stream_service = ChatStreamService(graph_service, sse_connection_registry)
+
+    async def initialize_app_state(app: FastAPI) -> None:
+        graph_registry = create_graph_registry(
+            settings=settings,
+            checkpoint_provider=checkpoint_provider,
+        )
+        graph_service = GraphService(
+            graph_registry,
+            llm_router,
+            mcp_tool_resolver=mcp_tool_resolver,
+            checkpoint_namespace_prefix=str(settings.app.name),
+        )
+        app.state.graph_service = graph_service
+        app.state.chat_stream_service = ChatStreamService(
+            graph_service,
+            sse_connection_registry,
+        )
+
     app = FastAPI(
         title=settings.app.name,
         lifespan=create_app_lifespan(
+            app_initializer=initialize_app_state,
+            checkpoint_provider=checkpoint_provider,
             sse_connection_registry=sse_connection_registry,
         ),
     )
-    app.state.graph_service = graph_service
     app.state.sse_connection_registry = sse_connection_registry
-    app.state.chat_stream_service = chat_stream_service
     app.state.logto_authenticator = logto_authenticator
     app.include_router(api_router)
 

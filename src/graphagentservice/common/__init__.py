@@ -1,7 +1,9 @@
 from .checkpoint import (
+    CheckpointConfigurationError,
     CheckpointProvider,
     DisabledCheckpointProvider,
     InMemoryCheckpointProvider,
+    PostgresCheckpointProvider,
     create_checkpoint_provider,
 )
 from .config import (
@@ -17,6 +19,7 @@ from .config import (
 
 __all__ = [
     "AppSettings",
+    "CheckpointConfigurationError",
     "CheckpointProvider",
     "DisabledCheckpointProvider",
     "GraphSettings",
@@ -25,6 +28,7 @@ __all__ = [
     "LogtoSettings",
     "MCPSettings",
     "ObservabilitySettings",
+    "PostgresCheckpointProvider",
     "Settings",
     "create_checkpoint_provider",
     "get_settings",
