@@ -1,13 +1,15 @@
 from __future__ import annotations
 
-import json
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response, status
-from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
-from graphagentservice.api.dependencies import build_graph_request_context, get_graph_service
+from graphagentservice.api.dependencies import (
+    build_graph_request_context,
+    get_graph_service,
+    get_graph_stream_dispatch_service,
+)
 from graphagentservice.common.trace import build_trace_response_headers
 from graphagentservice.graphs.registry import GraphNotFoundError
 from graphagentservice.llm import ChatModelBuildError
@@ -16,6 +18,7 @@ from graphagentservice.schemas.analysis import TextAnalysisOutput, TextAnalysisR
 from graphagentservice.schemas.api import (
     GraphDescriptorResponse,
     GraphInvokeResponse,
+    GraphStreamAcceptedResponse,
     TypedGraphInvokeResponse,
 )
 from graphagentservice.schemas.image import ImageAgentOutput, ImageAgentRequest
@@ -26,6 +29,11 @@ from graphagentservice.schemas.image_calories import (
 from graphagentservice.schemas.plan_analyze import PlanAnalyzeOutput, PlanAnalyzeRequest
 from graphagentservice.schemas.tool_agent import ToolAgentOutput, ToolAgentRequest
 from graphagentservice.services.graph_service import GraphPayloadValidationError, GraphService
+from graphagentservice.services.graph_stream_service import (
+    GraphStreamDispatchService,
+    graph_stream_payload_from_input,
+)
+from graphagentservice.services.sse import SseConnectionNotFoundError
 
 router = APIRouter(tags=["graphs"])
 
@@ -164,96 +172,141 @@ async def invoke_image_analyze_calories_graph(
 
 @router.post(
     "/graphs/text-analysis/stream",
+    response_model=GraphStreamAcceptedResponse,
     operation_id="streamTextAnalysisGraph",
 )
 async def stream_text_analysis_graph(
     request: Request,
+    response: Response,
     body: TextAnalysisRequest,
-    session_id: str | None = Query(default=None, alias="sessionId"),
-    graph_service: GraphService = Depends(get_graph_service),
-) -> StreamingResponse:
-    return _stream_graph(
+    session_id: str = Query(..., alias="sessionId"),
+    page_id: str = Query(..., alias="pageId"),
+    request_id: str | None = Query(default=None, alias="requestId"),
+    graph_stream_dispatch_service: GraphStreamDispatchService = Depends(
+        get_graph_stream_dispatch_service
+    ),
+) -> GraphStreamAcceptedResponse:
+    return await _dispatch_graph_stream(
         request=request,
+        response=response,
         graph_name=TEXT_ANALYSIS_GRAPH,
         payload=body,
         session_id=session_id,
-        graph_service=graph_service,
+        page_id=page_id,
+        request_id=request_id,
+        graph_stream_dispatch_service=graph_stream_dispatch_service,
     )
 
 
 @router.post(
     "/graphs/plan-analyze/stream",
+    response_model=GraphStreamAcceptedResponse,
     operation_id="streamPlanAnalyzeGraph",
 )
 async def stream_plan_analyze_graph(
     request: Request,
+    response: Response,
     body: PlanAnalyzeRequest,
-    session_id: str | None = Query(default=None, alias="sessionId"),
-    graph_service: GraphService = Depends(get_graph_service),
-) -> StreamingResponse:
-    return _stream_graph(
+    session_id: str = Query(..., alias="sessionId"),
+    page_id: str = Query(..., alias="pageId"),
+    request_id: str | None = Query(default=None, alias="requestId"),
+    graph_stream_dispatch_service: GraphStreamDispatchService = Depends(
+        get_graph_stream_dispatch_service
+    ),
+) -> GraphStreamAcceptedResponse:
+    return await _dispatch_graph_stream(
         request=request,
+        response=response,
         graph_name=PLAN_ANALYZE_GRAPH,
         payload=body,
         session_id=session_id,
-        graph_service=graph_service,
+        page_id=page_id,
+        request_id=request_id,
+        graph_stream_dispatch_service=graph_stream_dispatch_service,
     )
 
 
 @router.post(
     "/graphs/tool-agent/stream",
+    response_model=GraphStreamAcceptedResponse,
     operation_id="streamToolAgentGraph",
 )
 async def stream_tool_agent_graph(
     request: Request,
+    response: Response,
     body: ToolAgentRequest,
-    session_id: str | None = Query(default=None, alias="sessionId"),
-    graph_service: GraphService = Depends(get_graph_service),
-) -> StreamingResponse:
-    return _stream_graph(
+    session_id: str = Query(..., alias="sessionId"),
+    page_id: str = Query(..., alias="pageId"),
+    request_id: str | None = Query(default=None, alias="requestId"),
+    graph_stream_dispatch_service: GraphStreamDispatchService = Depends(
+        get_graph_stream_dispatch_service
+    ),
+) -> GraphStreamAcceptedResponse:
+    return await _dispatch_graph_stream(
         request=request,
+        response=response,
         graph_name=TOOL_AGENT_GRAPH,
         payload=body,
         session_id=session_id,
-        graph_service=graph_service,
+        page_id=page_id,
+        request_id=request_id,
+        graph_stream_dispatch_service=graph_stream_dispatch_service,
     )
 
 
 @router.post(
     "/graphs/image-agent/stream",
+    response_model=GraphStreamAcceptedResponse,
     operation_id="streamImageAgentGraph",
 )
 async def stream_image_agent_graph(
     request: Request,
+    response: Response,
     body: ImageAgentRequest,
-    session_id: str | None = Query(default=None, alias="sessionId"),
-    graph_service: GraphService = Depends(get_graph_service),
-) -> StreamingResponse:
-    return _stream_graph(
+    session_id: str = Query(..., alias="sessionId"),
+    page_id: str = Query(..., alias="pageId"),
+    request_id: str | None = Query(default=None, alias="requestId"),
+    graph_stream_dispatch_service: GraphStreamDispatchService = Depends(
+        get_graph_stream_dispatch_service
+    ),
+) -> GraphStreamAcceptedResponse:
+    return await _dispatch_graph_stream(
         request=request,
+        response=response,
         graph_name=IMAGE_AGENT_GRAPH,
         payload=body,
         session_id=session_id,
-        graph_service=graph_service,
+        page_id=page_id,
+        request_id=request_id,
+        graph_stream_dispatch_service=graph_stream_dispatch_service,
     )
 
 
 @router.post(
     "/graphs/image-analyze-calories/stream",
+    response_model=GraphStreamAcceptedResponse,
     operation_id="streamImageAnalyzeCaloriesGraph",
 )
 async def stream_image_analyze_calories_graph(
     request: Request,
+    response: Response,
     body: ImageCaloriesRequest,
-    session_id: str | None = Query(default=None, alias="sessionId"),
-    graph_service: GraphService = Depends(get_graph_service),
-) -> StreamingResponse:
-    return _stream_graph(
+    session_id: str = Query(..., alias="sessionId"),
+    page_id: str = Query(..., alias="pageId"),
+    request_id: str | None = Query(default=None, alias="requestId"),
+    graph_stream_dispatch_service: GraphStreamDispatchService = Depends(
+        get_graph_stream_dispatch_service
+    ),
+) -> GraphStreamAcceptedResponse:
+    return await _dispatch_graph_stream(
         request=request,
+        response=response,
         graph_name=IMAGE_ANALYZE_CALORIES_GRAPH,
         payload=body,
         session_id=session_id,
-        graph_service=graph_service,
+        page_id=page_id,
+        request_id=request_id,
+        graph_stream_dispatch_service=graph_stream_dispatch_service,
     )
 
 
@@ -282,21 +335,30 @@ async def invoke_graph(
 
 @router.post(
     "/graphs/{graph_name}/stream",
+    response_model=GraphStreamAcceptedResponse,
     include_in_schema=False,
 )
 async def stream_graph(
     request: Request,
+    response: Response,
     graph_name: str,
     payload: dict[str, Any],
-    session_id: str | None = Query(default=None, alias="sessionId"),
-    graph_service: GraphService = Depends(get_graph_service),
-) -> StreamingResponse:
-    return _stream_graph(
+    session_id: str = Query(..., alias="sessionId"),
+    page_id: str = Query(..., alias="pageId"),
+    request_id: str | None = Query(default=None, alias="requestId"),
+    graph_stream_dispatch_service: GraphStreamDispatchService = Depends(
+        get_graph_stream_dispatch_service
+    ),
+) -> GraphStreamAcceptedResponse:
+    return await _dispatch_graph_stream(
         request=request,
+        response=response,
         graph_name=graph_name,
         payload=payload,
         session_id=session_id,
-        graph_service=graph_service,
+        page_id=page_id,
+        request_id=request_id,
+        graph_stream_dispatch_service=graph_stream_dispatch_service,
     )
 
 
@@ -326,7 +388,7 @@ async def _invoke_graph(
         ) from exc
     except GraphPayloadValidationError as exc:
         raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
             detail=exc.errors,
             headers=trace_headers,
         ) from exc
@@ -345,38 +407,74 @@ async def _invoke_graph(
     )
 
 
-def _stream_graph(
+async def _dispatch_graph_stream(
     *,
     request: Request,
+    response: Response,
     graph_name: str,
     payload: BaseModel | dict[str, Any],
-    session_id: str | None,
-    graph_service: GraphService,
-) -> StreamingResponse:
+    session_id: str,
+    page_id: str,
+    request_id: str | None,
+    graph_stream_dispatch_service: GraphStreamDispatchService,
+) -> GraphStreamAcceptedResponse:
     request_context = build_graph_request_context(request)
+    trace_headers = build_trace_response_headers(request_context.trace_id)
+    resolved_session_id = _require_non_empty_query_id(
+        session_id,
+        field_name="sessionId",
+        headers=trace_headers,
+    )
+    resolved_page_id = _require_non_empty_query_id(
+        page_id,
+        field_name="pageId",
+        headers=trace_headers,
+    )
+    resolved_request_id = _resolve_optional_query_id(request_id)
 
-    async def event_generator():
-        try:
-            async for chunk in graph_service.stream(
-                graph_name=graph_name,
-                payload=payload,
-                session_id=session_id,
-                request_context=request_context,
-            ):
-                yield chunk
-        except GraphNotFoundError as exc:
-            yield _to_sse("error", {"detail": str(exc)})
-        except GraphPayloadValidationError as exc:
-            yield _to_sse("error", {"detail": exc.errors})
-        except (ChatModelBuildError, MCPConfigurationError, MCPToolResolutionError) as exc:
-            yield _to_sse("error", {"detail": str(exc)})
+    try:
+        accepted = await graph_stream_dispatch_service.execute(
+            graph_name=graph_name,
+            payload=graph_stream_payload_from_input(payload),
+            session_id=resolved_session_id,
+            page_id=resolved_page_id,
+            request_id=resolved_request_id,
+            request_context=request_context,
+        )
+    except SseConnectionNotFoundError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=str(exc),
+            headers=trace_headers,
+        ) from exc
 
-    return StreamingResponse(
-        event_generator(),
-        media_type="text/event-stream",
-        headers=build_trace_response_headers(request_context.trace_id),
+    response.headers.update(trace_headers)
+    return GraphStreamAcceptedResponse(
+        graph_name=accepted.graph_name,
+        session_id=accepted.session_id,
+        page_id=accepted.page_id,
+        request_id=accepted.request_id,
     )
 
 
-def _to_sse(event: str, data: dict[str, object]) -> str:
-    return f"event: {event}\ndata: {json.dumps(data, ensure_ascii=True)}\n\n"
+def _require_non_empty_query_id(
+    value: str,
+    *,
+    field_name: str,
+    headers: dict[str, str],
+) -> str:
+    candidate = value.strip()
+    if candidate:
+        return candidate
+    raise HTTPException(
+        status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+        detail=f"{field_name} must not be blank",
+        headers=headers,
+    )
+
+
+def _resolve_optional_query_id(value: str | None) -> str | None:
+    if not isinstance(value, str):
+        return None
+    candidate = value.strip()
+    return candidate or None

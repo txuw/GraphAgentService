@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import asyncio
 import json
+from contextlib import asynccontextmanager
 from collections.abc import AsyncIterator
 from dataclasses import dataclass
 from uuid import uuid4
@@ -44,6 +46,52 @@ class GraphPayloadValidationError(ValueError):
         self.errors = errors
 
 
+class _SessionExecutionCoordinator:
+    def __init__(self) -> None:
+        self._registry_lock = asyncio.Lock()
+        self._locks: dict[tuple[str, str], asyncio.Lock] = {}
+        self._references: dict[tuple[str, str], int] = {}
+
+    @asynccontextmanager
+    async def hold(self, *, graph_name: str, session_id: str):
+        key = (graph_name, session_id)
+        lock = await self._retain_lock(key)
+        try:
+            await lock.acquire()
+        except BaseException:
+            await self._release_reference(key, lock)
+            raise
+        try:
+            yield
+        finally:
+            lock.release()
+            await self._release_reference(key, lock)
+
+    async def _retain_lock(self, key: tuple[str, str]) -> asyncio.Lock:
+        async with self._registry_lock:
+            lock = self._locks.get(key)
+            if lock is None:
+                lock = asyncio.Lock()
+                self._locks[key] = lock
+                self._references[key] = 0
+            self._references[key] += 1
+            return lock
+
+    async def _release_reference(
+        self,
+        key: tuple[str, str],
+        lock: asyncio.Lock,
+    ) -> None:
+        async with self._registry_lock:
+            remaining = self._references.get(key, 0) - 1
+            if remaining > 0:
+                self._references[key] = remaining
+                return
+            self._references.pop(key, None)
+            if not lock.locked():
+                self._locks.pop(key, None)
+
+
 class GraphService:
     def __init__(
         self,
@@ -56,6 +104,7 @@ class GraphService:
         self._llm_router = llm_router
         self._mcp_tool_resolver = mcp_tool_resolver
         self._checkpoint_namespace_prefix = checkpoint_namespace_prefix.strip()
+        self._session_execution_coordinator = _SessionExecutionCoordinator()
 
     def list_graphs(self) -> tuple[GraphRuntime, ...]:
         return self._registry.list_runtimes()
@@ -71,14 +120,18 @@ class GraphService:
         payload_dict = self._payload_to_dict(payload)
         graph_input = self._validate_payload(runtime, payload_dict)
         resolved_session_id = self._resolve_session_id(session_id=session_id, payload=payload_dict)
-        state = await runtime.graph.ainvoke(
-            graph_input.model_dump(),
-            config=self._build_graph_config(
-                runtime=runtime,
-                session_id=resolved_session_id,
-            ),
-            context=self._build_context(runtime, request_context=request_context),
-        )
+        async with self._session_execution_coordinator.hold(
+            graph_name=runtime.name,
+            session_id=resolved_session_id,
+        ):
+            state = await runtime.graph.ainvoke(
+                graph_input.model_dump(),
+                config=self._build_graph_config(
+                    runtime=runtime,
+                    session_id=resolved_session_id,
+                ),
+                context=self._build_context(runtime, request_context=request_context),
+            )
         return GraphInvocationResult(
             graph_name=graph_name,
             session_id=resolved_session_id,
@@ -111,34 +164,37 @@ class GraphService:
         payload_dict = self._payload_to_dict(payload)
         graph_input = self._validate_payload(runtime, payload_dict)
         resolved_session_id = self._resolve_session_id(session_id=session_id, payload=payload_dict)
-
-        yield GraphStreamEvent(
-            event="session",
-            data={"graph_name": graph_name, "session_id": resolved_session_id},
-        )
-        final_state: dict[str, object] | None = None
-        async for chunk in runtime.graph.astream(
-            graph_input.model_dump(),
-            config=self._build_graph_config(
-                runtime=runtime,
-                session_id=resolved_session_id,
-            ),
-            context=self._build_context(runtime, request_context=request_context),
-            stream_mode=list(runtime.stream_modes),
-            version="v2",
+        async with self._session_execution_coordinator.hold(
+            graph_name=runtime.name,
+            session_id=resolved_session_id,
         ):
-            chunk_type = str(chunk["type"])
-            if chunk_type == "values":
-                final_state = chunk["data"]
-                continue
             yield GraphStreamEvent(
-                event=chunk_type,
-                data=self._serialize_stream_chunk(chunk),
+                event="session",
+                data={"graph_name": graph_name, "session_id": resolved_session_id},
             )
+            final_state: dict[str, object] | None = None
+            async for chunk in runtime.graph.astream(
+                graph_input.model_dump(),
+                config=self._build_graph_config(
+                    runtime=runtime,
+                    session_id=resolved_session_id,
+                ),
+                context=self._build_context(runtime, request_context=request_context),
+                stream_mode=list(runtime.stream_modes),
+                version="v2",
+            ):
+                chunk_type = str(chunk["type"])
+                if chunk_type == "values":
+                    final_state = chunk["data"]
+                    continue
+                yield GraphStreamEvent(
+                    event=chunk_type,
+                    data=self._serialize_stream_chunk(chunk),
+                )
 
-        output = runtime.output_model.model_validate(final_state or {})
-        yield GraphStreamEvent(event="result", data=output.model_dump())
-        yield GraphStreamEvent(event="completed", data={"session_id": resolved_session_id})
+            output = runtime.output_model.model_validate(final_state or {})
+            yield GraphStreamEvent(event="result", data=output.model_dump())
+            yield GraphStreamEvent(event="completed", data={"session_id": resolved_session_id})
 
     @staticmethod
     def _resolve_session_id(*, session_id: str | None, payload: dict[str, object]) -> str:

@@ -63,6 +63,15 @@ class ChatExecuteResponse(BaseModel):
     request_id: str
 
 
+class GraphStreamAcceptedResponse(BaseModel):
+    success: bool = Field(default=True)
+    accepted: bool = Field(default=True)
+    graph_name: str
+    session_id: str
+    page_id: str
+    request_id: str
+
+
 class ChatExecuteRequestBase(BaseModel):
     model_config = ConfigDict(populate_by_name=True)
 

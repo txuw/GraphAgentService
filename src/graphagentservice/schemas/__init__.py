@@ -4,6 +4,7 @@ from .api import (
     ChatExecuteResponse,
     GraphDescriptorResponse,
     GraphInvokeResponse,
+    GraphStreamAcceptedResponse,
 )
 from .image_calories import CalorieInfo, FoodItem
 from .plan_analyze import PlanAnalyzeOutput, PlanAnalyzeRequest
@@ -16,6 +17,7 @@ __all__ = [
     "FoodItem",
     "GraphDescriptorResponse",
     "GraphInvokeResponse",
+    "GraphStreamAcceptedResponse",
     "StructuredTextAnalysis",
     "TextAnalysisOutput",
     "TextAnalysisRequest",

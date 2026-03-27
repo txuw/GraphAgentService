@@ -7,7 +7,12 @@ from graphagentservice.common.lifecycle import create_app_lifespan
 from graphagentservice.graphs import create_graph_registry
 from graphagentservice.llm import LLMRouter
 from graphagentservice.mcp import MCPSettings, MCPToolResolver
-from graphagentservice.services import ChatStreamService, GraphService, SseConnectionRegistry
+from graphagentservice.services import (
+    ChatStreamService,
+    GraphService,
+    GraphStreamDispatchService,
+    SseConnectionRegistry,
+)
 
 
 def create_app() -> FastAPI:
@@ -32,6 +37,10 @@ def create_app() -> FastAPI:
         )
         app.state.graph_service = graph_service
         app.state.chat_stream_service = ChatStreamService(
+            graph_service,
+            sse_connection_registry,
+        )
+        app.state.graph_stream_dispatch_service = GraphStreamDispatchService(
             graph_service,
             sse_connection_registry,
         )
