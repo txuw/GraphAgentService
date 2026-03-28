@@ -4,15 +4,14 @@ from uuid import uuid4
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request, Response, status
 from fastapi.responses import StreamingResponse
-from pydantic import BaseModel
 
 from graphagentservice.api.dependencies import (
     build_graph_request_context,
     get_chat_stream_service,
+    get_current_user,
     get_sse_connection_registry,
 )
 from graphagentservice.common.trace import build_trace_response_headers
-from graphagentservice.schemas.analysis import TextAnalysisRequest
 from graphagentservice.schemas.api import (
     ChatExecuteRequest,
     ChatExecuteRequestBase,
@@ -23,10 +22,6 @@ from graphagentservice.schemas.api import (
     TextAnalysisChatExecuteRequest,
     ToolAgentChatExecuteRequest,
 )
-from graphagentservice.schemas.image import ImageAgentRequest
-from graphagentservice.schemas.image_calories import ImageCaloriesRequest
-from graphagentservice.schemas.plan_analyze import PlanAnalyzeRequest
-from graphagentservice.schemas.tool_agent import ToolAgentRequest
 from graphagentservice.services.chat_stream_service import ChatStreamService
 from graphagentservice.services.sse import (
     SseConnectionNotFoundError,
@@ -52,9 +47,11 @@ async def connect_sse(
 ) -> StreamingResponse:
     resolved_session_id = _resolve_optional_id(session_id)
     resolved_page_id = _resolve_optional_id(page_id)
+    current_user = get_current_user(request)
     connection = await sse_connection_registry.register(
         session_id=resolved_session_id,
         page_id=resolved_page_id,
+        user_id=current_user.user_id,
         last_event_id=last_event_id,
     )
     await sse_connection_registry.send_connected_event(connection)
@@ -93,7 +90,6 @@ async def execute_text_analysis_chat(
         response=response,
         graph_name=TEXT_ANALYSIS_GRAPH,
         body=body,
-        input_model=TextAnalysisRequest,
         chat_stream_service=chat_stream_service,
     )
 
@@ -114,7 +110,6 @@ async def execute_plan_analyze_chat(
         response=response,
         graph_name=PLAN_ANALYZE_GRAPH,
         body=body,
-        input_model=PlanAnalyzeRequest,
         chat_stream_service=chat_stream_service,
     )
 
@@ -135,7 +130,6 @@ async def execute_tool_agent_chat(
         response=response,
         graph_name=TOOL_AGENT_GRAPH,
         body=body,
-        input_model=ToolAgentRequest,
         chat_stream_service=chat_stream_service,
     )
 
@@ -156,7 +150,6 @@ async def execute_image_agent_chat(
         response=response,
         graph_name=IMAGE_AGENT_GRAPH,
         body=body,
-        input_model=ImageAgentRequest,
         chat_stream_service=chat_stream_service,
     )
 
@@ -177,7 +170,6 @@ async def execute_image_analyze_calories_chat(
         response=response,
         graph_name=IMAGE_ANALYZE_CALORIES_GRAPH,
         body=body,
-        input_model=ImageCaloriesRequest,
         chat_stream_service=chat_stream_service,
     )
 
@@ -226,12 +218,11 @@ async def _execute_chat(
     response: Response,
     graph_name: str,
     body: ChatExecuteRequestBase,
-    input_model: type[BaseModel],
     chat_stream_service: ChatStreamService,
 ) -> ChatExecuteResponse:
     request_context = build_graph_request_context(request)
     trace_headers = build_trace_response_headers(request_context.trace_id)
-    payload = input_model.model_validate(body.model_dump()).model_dump()
+    payload = body.graph_payload()
     try:
         accepted = await chat_stream_service.execute(
             graph_name=graph_name,

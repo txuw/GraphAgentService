@@ -36,13 +36,13 @@ def create_app() -> FastAPI:
             checkpoint_namespace_prefix=str(settings.app.name),
         )
         app.state.graph_service = graph_service
-        app.state.chat_stream_service = ChatStreamService(
+        graph_stream_dispatch_service = GraphStreamDispatchService(
             graph_service,
             sse_connection_registry,
         )
-        app.state.graph_stream_dispatch_service = GraphStreamDispatchService(
-            graph_service,
-            sse_connection_registry,
+        app.state.graph_stream_dispatch_service = graph_stream_dispatch_service
+        app.state.chat_stream_service = ChatStreamService(
+            graph_stream_dispatch_service,
         )
 
     app = FastAPI(

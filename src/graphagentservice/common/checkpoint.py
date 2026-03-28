@@ -58,6 +58,7 @@ class PostgresCheckpointProvider:
         if self._started:
             return
 
+        _ensure_windows_selector_event_loop_policy()
         try:
             from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
         except ImportError as exc:
@@ -117,6 +118,7 @@ def create_checkpoint_provider(settings: GraphSettings) -> CheckpointProvider:
         return InMemoryCheckpointProvider()
 
     if checkpoint_mode in postgres_modes:
+        _ensure_windows_selector_event_loop_policy()
         connection_string = _read_nested_setting(settings, "checkpoint", "postgres", "url")
         if not isinstance(connection_string, str) or not connection_string.strip():
             raise CheckpointConfigurationError(
@@ -141,3 +143,15 @@ def _read_nested_setting(settings: Any, *parts: str) -> Any:
         if current is None:
             return None
     return current
+
+
+def _ensure_windows_selector_event_loop_policy() -> None:
+    if sys.platform != "win32":
+        return
+    selector_policy = getattr(asyncio, "WindowsSelectorEventLoopPolicy", None)
+    if selector_policy is None:
+        return
+    current_policy = asyncio.get_event_loop_policy()
+    if isinstance(current_policy, selector_policy):
+        return
+    asyncio.set_event_loop_policy(selector_policy())

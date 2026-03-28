@@ -26,6 +26,7 @@ class GraphRunContext:
     request_headers: Mapping[str, str] = field(default_factory=dict)
     mcp_tool_resolver: MCPToolResolver | None = None
     mcp_servers: tuple[str, ...] = ()
+    tool_event_emitter: Any | None = None
 
     def resolve_model(
         self,
@@ -158,6 +159,11 @@ class GraphRunContext:
             metadata=metadata,
         )
         return model.bind_tools(tools, **kwargs)
+
+    def instrument_tools(self, tools: Sequence[Any]) -> list[Any]:
+        if self.tool_event_emitter is None:
+            return list(tools)
+        return self.tool_event_emitter.wrap_tools(tools)
 
 
 @dataclass(frozen=True, slots=True)

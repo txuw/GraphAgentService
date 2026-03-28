@@ -88,14 +88,15 @@ class ToolAgentNodes:
     ) -> list[BaseTool]:
         resolver = runtime.context.mcp_tool_resolver
         if resolver is None:
-            return self._build_local_tools()
+            return runtime.context.instrument_tools(self._build_local_tools())
 
-        return await resolver.resolve_tools(
+        tools = await resolver.resolve_tools(
             graph_name=runtime.context.graph_name,
             server_names=runtime.context.mcp_servers,
             current_user=runtime.context.current_user,
             request_headers=dict(runtime.context.request_headers),
         )
+        return runtime.context.instrument_tools(tools)
 
     @staticmethod
     def build_messages(messages: Sequence[Any]) -> list[object]:

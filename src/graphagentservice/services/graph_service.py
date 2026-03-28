@@ -37,6 +37,7 @@ class GraphRequestContext:
     current_user: AuthenticatedUser
     trace_id: str
     request_headers: dict[str, str]
+    tool_event_emitter: object | None = None
 
 
 class GraphPayloadValidationError(ValueError):
@@ -237,6 +238,9 @@ class GraphService:
             request_headers=resolved_request_context.request_headers,
             mcp_tool_resolver=self._mcp_tool_resolver,
             mcp_servers=runtime.mcp_servers,
+            tool_event_emitter=request_context.tool_event_emitter
+            if request_context is not None
+            else None,
         )
 
     def _build_graph_config(

@@ -1,4 +1,5 @@
-from .chat_stream_service import ChatStreamAccepted, ChatStreamService, SseEventAdapter
+from .agent_events import AgentStreamEventAdapter as SseEventAdapter
+from .chat_stream_service import ChatStreamAccepted, ChatStreamService
 from .graph_service import (
     GraphInvocationResult,
     GraphPayloadValidationError,
