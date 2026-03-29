@@ -1,16 +1,19 @@
 from __future__ import annotations
 
+import logging
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from functools import partial
 from typing import TYPE_CHECKING, Any
 
-from pydantic import BaseModel
 from langchain_core.runnables import RunnableLambda
+from pydantic import BaseModel
 
 from graphagentservice.common.auth import AuthenticatedUser
 from graphagentservice.common.trace import TRACE_ID_HEADER
 from graphagentservice.llm.router import LLMRouter
+
+logger = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
     from graphagentservice.mcp import MCPToolResolver
@@ -123,7 +126,19 @@ class GraphRunContext:
             metadata=metadata,
         )
         bind_kwargs = dict(kwargs)
-        if _supports_json_object_response_format(resolved_profile):
+        if _supports_json_schema_response_format(resolved_profile):
+            # json_schema 模式：将完整 Pydantic schema 下发给模型，
+            # Gemini 等支持此模式的模型会严格按 schema 生成 JSON，
+            # 比 json_object 更可靠，尤其是多模态（图片）请求。
+            bind_kwargs["response_format"] = {
+                "type": "json_schema",
+                "json_schema": {
+                    "name": schema.__name__,
+                    "schema": schema.model_json_schema(),
+                    "strict": False,
+                },
+            }
+        elif _supports_json_object_response_format(resolved_profile):
             bind_kwargs["response_format"] = {"type": "json_object"}
         return model.bind(**bind_kwargs) | RunnableLambda(
             partial(_validate_json_object_response, schema=schema)
@@ -208,15 +223,56 @@ def _response_to_text(response: Any) -> str:
 
 def _normalize_json_payload(payload: str) -> str:
     candidate = payload.strip()
-    if not candidate.startswith("```"):
+
+    # Strip markdown code fences (```json ... ``` or ``` ... ```)
+    if candidate.startswith("```"):
+        lines = candidate.splitlines()
+        if len(lines) >= 3 and lines[-1].strip() == "```":
+            candidate = "\n".join(lines[1:-1]).strip()
+            # Fall through to check if the unwrapped content is already valid JSON
+
+    # Already looks like a JSON object or array
+    if candidate.startswith(("{", "[")):
         return candidate
 
-    lines = candidate.splitlines()
-    if len(lines) >= 3 and lines[-1].strip() == "```":
-        return "\n".join(lines[1:-1]).strip()
+    # Model returned natural language with (or without) embedded JSON.
+    # Try to extract the outermost { ... } or [ ... ] block.
+    for open_char, close_char in (("{", "}"), ("[", "]")):
+        start = candidate.find(open_char)
+        if start == -1:
+            continue
+        end = candidate.rfind(close_char)
+        if end > start:
+            extracted = candidate[start : end + 1].strip()
+            logger.warning(
+                "LLM returned non-JSON response; extracted JSON fragment from prose. "
+                "Full response prefix: %.120s",
+                candidate,
+            )
+            return extracted
+
+    # No JSON found – return as-is so that downstream validation reports the error clearly
     return candidate
 
 
-def _supports_json_object_response_format(profile: Any) -> bool:
+# 支持 response_format: json_schema 的模型前缀（含 LiteLLM 路由前缀）
+_JSON_SCHEMA_FORMAT_ALLOWLIST = frozenset({"gemini"})
+
+# 不支持 response_format: json_object 的模型前缀
+_JSON_OBJECT_FORMAT_BLOCKLIST = frozenset({"doubao"})
+
+
+def _supports_json_schema_response_format(profile: Any) -> bool:
+    """Return True for models that support ``response_format: json_schema``.
+
+    Gemini（via LiteLLM OpenAI 兼容接口）原生支持 json_schema 模式，
+    可将完整 Pydantic schema 下发，比 json_object 更可靠，尤其在多模态场景。
+    """
     model_name = str(getattr(profile, "model", "")).lower()
-    return "doubao" not in model_name
+    return any(prefix in model_name for prefix in _JSON_SCHEMA_FORMAT_ALLOWLIST)
+
+
+def _supports_json_object_response_format(profile: Any) -> bool:
+    """Return True only for models known to honour ``response_format: json_object``."""
+    model_name = str(getattr(profile, "model", "")).lower()
+    return not any(blocked in model_name for blocked in _JSON_OBJECT_FORMAT_BLOCKLIST)
