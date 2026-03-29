@@ -12,6 +12,7 @@ from graphagentservice.api.dependencies import (
     get_current_user,
     get_sse_connection_registry,
 )
+from graphagentservice.common.logging import log_payload
 from graphagentservice.common.trace import build_trace_response_headers
 
 _logger = logging.getLogger(__name__)
@@ -205,6 +206,7 @@ async def execute_chat(
         body.page_id or "-",
         body.request_id or "-",
     )
+    log_payload(_logger, "Chat execute request", body.input)
     try:
         accepted = await chat_stream_service.execute(
             graph_name=body.graph_name,
@@ -227,6 +229,12 @@ async def execute_chat(
             headers=trace_headers,
         ) from exc
 
+    result_dto = ChatExecuteResponse(
+        graph_name=accepted.graph_name,
+        session_id=accepted.session_id,
+        page_id=accepted.page_id,
+        request_id=accepted.request_id,
+    )
     _logger.info(
         "Chat execute accepted  graph=%s  session=%s  page=%s  requestId=%s",
         accepted.graph_name,
@@ -234,13 +242,9 @@ async def execute_chat(
         accepted.page_id or "-",
         accepted.request_id,
     )
+    log_payload(_logger, "Chat execute response", result_dto.model_dump())
     response.headers.update(trace_headers)
-    return ChatExecuteResponse(
-        graph_name=accepted.graph_name,
-        session_id=accepted.session_id,
-        page_id=accepted.page_id,
-        request_id=accepted.request_id,
-    )
+    return result_dto
 
 
 async def _execute_chat(
@@ -261,6 +265,7 @@ async def _execute_chat(
         body.page_id or "-",
         body.request_id or "-",
     )
+    log_payload(_logger, "Chat execute request", payload)
     try:
         accepted = await chat_stream_service.execute(
             graph_name=graph_name,
@@ -283,6 +288,12 @@ async def _execute_chat(
             headers=trace_headers,
         ) from exc
 
+    result_dto = ChatExecuteResponse(
+        graph_name=accepted.graph_name,
+        session_id=accepted.session_id,
+        page_id=accepted.page_id,
+        request_id=accepted.request_id,
+    )
     _logger.info(
         "Chat execute accepted  graph=%s  session=%s  page=%s  requestId=%s",
         accepted.graph_name,
@@ -290,13 +301,9 @@ async def _execute_chat(
         accepted.page_id or "-",
         accepted.request_id,
     )
+    log_payload(_logger, "Chat execute response", result_dto.model_dump())
     response.headers.update(trace_headers)
-    return ChatExecuteResponse(
-        graph_name=accepted.graph_name,
-        session_id=accepted.session_id,
-        page_id=accepted.page_id,
-        request_id=accepted.request_id,
-    )
+    return result_dto
 
 
 def _resolve_optional_id(value: str | None) -> str:

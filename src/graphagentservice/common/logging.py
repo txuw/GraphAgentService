@@ -185,6 +185,41 @@ def build_log_config(log_level: str = "INFO") -> dict[str, Any]:
     }
 
 
+def fmt_payload(data: object, max_chars: int = 800) -> str:
+    """Serialize *data* to a truncated JSON string suitable for log output.
+
+    Truncation prevents large base64 image payloads from flooding logs.
+    """
+    import json as _json
+
+    try:
+        text = _json.dumps(data, ensure_ascii=False, default=str)
+    except Exception:
+        text = repr(data)
+    if len(text) <= max_chars:
+        return text
+    return text[:max_chars] + f" ...[+{len(text) - max_chars} chars]"
+
+
+def log_payload(logger: logging.Logger, label: str, data: object) -> None:
+    """Log request / response payload, respecting the ``observability.log_payloads`` setting.
+
+    - ``log_payloads=true``  → logged at **INFO** level (always visible).
+    - ``log_payloads=false`` → logged at **DEBUG** level (requires ``log_level: debug``).
+    """
+    try:
+        # Lazy import avoids circular dependency at module load time.
+        from graphagentservice.common.config import get_settings  # noqa: PLC0415
+
+        enabled = bool(get_settings().observability.log_payloads)
+    except Exception:
+        enabled = False
+
+    level = logging.INFO if enabled else logging.DEBUG
+    if logger.isEnabledFor(level):
+        logger.log(level, "%s  %s", label, fmt_payload(data))
+
+
 def configure_logging(settings: Any) -> None:
     """Configure application-wide logging from *settings*.
 

@@ -5,6 +5,8 @@ from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response, status
 
+from graphagentservice.common.logging import log_payload
+
 _logger = logging.getLogger(__name__)
 
 from graphagentservice.api.dependencies import (
@@ -448,6 +450,7 @@ async def _invoke_graph(
     request_context = build_graph_request_context(request)
     trace_headers = build_trace_response_headers(request_context.trace_id)
     _logger.info("Graph invoke  graph=%s  session=%s", graph_name, session_id or "-")
+    log_payload(_logger, "Graph invoke request", payload)
     try:
         result = await graph_service.invoke(
             graph_name=graph_name,
@@ -486,13 +489,15 @@ async def _invoke_graph(
             headers=trace_headers,
         ) from exc
 
+    result_data = result.output.model_dump()
     _logger.info(
         "Graph invoke completed  graph=%s  session=%s",
         result.graph_name,
         result.session_id,
     )
+    log_payload(_logger, "Graph invoke response", result_data)
     response.headers.update(trace_headers)
-    return ResultResponse(data=result.output.model_dump())
+    return ResultResponse(data=result_data)
 
 
 async def _dispatch_graph_stream(
@@ -523,6 +528,7 @@ async def _dispatch_graph_stream(
         resolved_page_id or "-",
         resolved_request_id or "-",
     )
+    log_payload(_logger, "Graph stream request", payload)
     try:
         accepted = await graph_stream_dispatch_service.execute(
             graph_name=graph_name,

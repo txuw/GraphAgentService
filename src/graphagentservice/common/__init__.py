@@ -19,7 +19,9 @@ from .config import (
 from .logging import (
     build_log_config,
     configure_logging,
+    fmt_payload,
     get_log_trace_id,
+    log_payload,
     reset_log_trace_id,
     set_log_trace_id,
 )
@@ -40,8 +42,10 @@ __all__ = [
     "build_log_config",
     "configure_logging",
     "create_checkpoint_provider",
+    "fmt_payload",
     "get_log_trace_id",
     "get_settings",
+    "log_payload",
     "reset_log_trace_id",
     "set_log_trace_id",
 ]
