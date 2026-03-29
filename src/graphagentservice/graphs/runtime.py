@@ -16,6 +16,21 @@ if TYPE_CHECKING:
     from graphagentservice.mcp import MCPToolResolver
 
 
+class ToolEventEmitterProtocol:
+    """
+    Structural protocol for the tool stream event emitter.
+
+    Graph nodes depend on this interface only – they never import the concrete
+    implementation, keeping the graphs package free of services imports.
+    """
+
+    async def emit_start(self, tool_name: str) -> None: ...
+
+    async def emit_done(self, tool_name: str) -> None: ...
+
+    async def emit_error(self, tool_name: str, error_message: str) -> None: ...
+
+
 @dataclass(frozen=True, slots=True)
 class GraphRunContext:
     llm_router: LLMRouter
@@ -26,7 +41,7 @@ class GraphRunContext:
     request_headers: Mapping[str, str] = field(default_factory=dict)
     mcp_tool_resolver: MCPToolResolver | None = None
     mcp_servers: tuple[str, ...] = ()
-    tool_event_emitter: Any | None = None
+    tool_stream_emitter: ToolEventEmitterProtocol | None = None
 
     def resolve_model(
         self,
@@ -134,13 +149,12 @@ class GraphRunContext:
         metadata: Mapping[str, Any] | None = None,
         **kwargs: Any,
     ):
-        model = self.resolve_model(
+        return self.resolve_model(
             binding=binding,
             profile=profile,
             tags=tags,
             metadata=metadata,
         )
-        return model
 
     def tool_model(
         self,
@@ -159,11 +173,6 @@ class GraphRunContext:
             metadata=metadata,
         )
         return model.bind_tools(tools, **kwargs)
-
-    def instrument_tools(self, tools: Sequence[Any]) -> list[Any]:
-        if self.tool_event_emitter is None:
-            return list(tools)
-        return self.tool_event_emitter.wrap_tools(tools)
 
 
 @dataclass(frozen=True, slots=True)

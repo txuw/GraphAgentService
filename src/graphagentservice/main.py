@@ -11,8 +11,10 @@ from graphagentservice.services import (
     ChatStreamService,
     GraphService,
     GraphStreamDispatchService,
+    InProcessStreamEventBus,
     PlanAnalyzeSummaryService,
     SseConnectionRegistry,
+    SseStreamEventSink,
 )
 
 
@@ -24,6 +26,10 @@ def create_app() -> FastAPI:
     mcp_settings = MCPSettings.model_validate(settings.get("mcp", {}))
     mcp_tool_resolver = MCPToolResolver(mcp_settings)
     sse_connection_registry = SseConnectionRegistry()
+
+    stream_event_bus = InProcessStreamEventBus()
+    sse_sink = SseStreamEventSink(registry=sse_connection_registry)
+    stream_event_bus.subscribe(sse_sink)
 
     async def initialize_app_state(app: FastAPI) -> None:
         graph_registry = create_graph_registry(
@@ -39,6 +45,7 @@ def create_app() -> FastAPI:
         app.state.graph_service = graph_service
         graph_stream_dispatch_service = GraphStreamDispatchService(
             graph_service,
+            stream_event_bus,
             sse_connection_registry,
         )
         app.state.graph_stream_dispatch_service = graph_stream_dispatch_service

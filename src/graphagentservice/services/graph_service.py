@@ -14,7 +14,7 @@ from pydantic import BaseModel, ValidationError
 from graphagentservice.common.auth import AuthenticatedUser
 from graphagentservice.common.trace import TRACE_ID_HEADER, resolve_request_trace_context
 from graphagentservice.graphs.registry import GraphRegistry
-from graphagentservice.graphs.runtime import GraphRunContext, GraphRuntime
+from graphagentservice.graphs.runtime import GraphRunContext, GraphRuntime, ToolEventEmitterProtocol
 from graphagentservice.llm.router import LLMRouter
 from graphagentservice.mcp import MCPToolResolver
 
@@ -37,7 +37,7 @@ class GraphRequestContext:
     current_user: AuthenticatedUser
     trace_id: str
     request_headers: dict[str, str]
-    tool_event_emitter: object | None = None
+    tool_stream_emitter: ToolEventEmitterProtocol | None = None
 
 
 class GraphPayloadValidationError(ValueError):
@@ -290,7 +290,7 @@ class GraphService:
             request_headers=resolved_request_context.request_headers,
             mcp_tool_resolver=self._mcp_tool_resolver,
             mcp_servers=runtime.mcp_servers,
-            tool_event_emitter=request_context.tool_event_emitter
+            tool_stream_emitter=request_context.tool_stream_emitter
             if request_context is not None
             else None,
         )

@@ -9,7 +9,6 @@ from itertools import count
 from uuid import uuid4
 
 from graphagentservice.schemas.api import AgentStreamEvent
-from graphagentservice.services.agent_events import AgentStreamEventFactory
 
 
 class SseConnectionNotFoundError(LookupError):
@@ -53,9 +52,7 @@ class SseConnection:
 
     async def push(self, message: SseEventMessage) -> None:
         if self._closed:
-            raise SseConnectionNotFoundError(
-                self.describe_missing(),
-            )
+            raise SseConnectionNotFoundError(self.describe_missing())
         await self.queue.put(message)
 
     async def close(self) -> None:
@@ -186,17 +183,24 @@ class SseConnectionRegistry:
             await connection.close()
 
     async def send_connected_event(self, connection: SseConnection) -> None:
-        factory = AgentStreamEventFactory(
-            target=_connection_target(connection),
-        )
-        event = factory.build_connected(
+        seq = connection.next_sequence()
+        event = AgentStreamEvent(
             session_id=connection.session_id,
-            page_id=connection.page_id,
-            connection_id=connection.connection_id,
-            user_id=connection.user_id,
-            last_event_id=connection.last_event_id,
-            connected_at=connection.connected_at,
-            sequence_id=connection.next_sequence(),
+            event_type="connected",
+            event_id=f"connected:{connection.connection_id}:{seq}",
+            content=json.dumps(
+                {
+                    "connectionId": connection.connection_id,
+                    "userId": connection.user_id,
+                    "sessionId": connection.session_id,
+                    "pageId": connection.page_id,
+                    "serverTime": connection.connected_at.isoformat(),
+                    "lastEventId": connection.last_event_id,
+                },
+                ensure_ascii=False,
+                separators=(",", ":"),
+            ),
+            done=False,
         )
         await connection.push(self._build_message(event))
 
@@ -236,14 +240,18 @@ class SseConnectionRegistry:
                 except TimeoutError:
                     if is_disconnected is not None and await is_disconnected():
                         break
+                    seq = connection.next_sequence()
                     yield self._build_message(
-                        AgentStreamEventFactory(
-                            target=_connection_target(connection),
-                        ).build_heartbeat(
+                        AgentStreamEvent(
                             session_id=connection.session_id,
-                            page_id=connection.page_id,
-                            connection_id=connection.connection_id,
-                            sequence_id=connection.next_sequence(),
+                            event_type="heartbeat",
+                            event_id=f"heartbeat:{connection.connection_id}:{seq}",
+                            content=json.dumps(
+                                {"ts": datetime.now(UTC).isoformat()},
+                                ensure_ascii=False,
+                                separators=(",", ":"),
+                            ),
+                            done=False,
                         )
                     ).encode()
                     continue
@@ -293,16 +301,3 @@ def _missing_message(
     if page_id is not None:
         parts.append(f"page_id={page_id}")
     return f"SSE connection not found: {', '.join(parts)}"
-
-
-def _connection_target(connection: SseConnection):
-    from graphagentservice.services.agent_events import RequestEventTarget
-
-    return RequestEventTarget(
-        graph_name="connection",
-        session_id=connection.session_id,
-        request_id="",
-        trace_id="",
-        user_id=connection.user_id,
-        page_id=connection.page_id,
-    )

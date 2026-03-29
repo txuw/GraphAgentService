@@ -73,8 +73,8 @@ class PlanAnalyzeNodes:
         state: PlanAnalyzeGraphState,
         runtime: Runtime[GraphRunContext],
     ) -> dict[str, list[object]]:
-        tools = await self._resolve_tools(runtime)
-        tool_node = ToolNode(tools)
+        resolved_tools = await self._resolve_tools(runtime)
+        tool_node = _build_tool_node(resolved_tools, runtime)
         result = await tool_node.ainvoke(state, runtime=runtime)
         if isinstance(result, dict):
             return result
@@ -124,13 +124,12 @@ class PlanAnalyzeNodes:
         if resolver is None:
             return []
 
-        tools = await resolver.resolve_tools(
+        return await resolver.resolve_tools(
             graph_name=runtime.context.graph_name,
             server_names=runtime.context.mcp_servers,
             current_user=runtime.context.current_user,
             request_headers=dict(runtime.context.request_headers),
         )
-        return runtime.context.instrument_tools(tools)
 
     @staticmethod
     def _content_to_text(response: Any) -> str:
@@ -146,3 +145,15 @@ class PlanAnalyzeNodes:
                     parts.append(str(block))
             return "\n".join(parts).strip()
         return str(content).strip()
+
+
+def _build_tool_node(
+    tools: list[BaseTool],
+    runtime: Runtime[GraphRunContext],
+) -> ToolNode:
+    from graphagentservice.services.tool_execution import ObservedToolNode
+
+    emitter = runtime.context.tool_stream_emitter
+    if emitter is not None:
+        return ObservedToolNode(tools, emitter=emitter)
+    return ToolNode(tools)

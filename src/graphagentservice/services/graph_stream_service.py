@@ -11,19 +11,15 @@ from graphagentservice.graphs.registry import GraphNotFoundError
 from graphagentservice.llm import ChatModelBuildError
 from graphagentservice.mcp import MCPConfigurationError, MCPToolResolutionError
 
-from .agent_events import (
-    AgentStreamEventAdapter,
-    AgentStreamEventFactory,
-    RequestEventSequence,
-    RequestEventTarget,
-    ToolEventEmitter,
-)
 from .graph_service import (
     GraphPayloadValidationError,
     GraphRequestContext,
     GraphService,
 )
-from .sse import SseConnectionNotFoundError, SseConnectionRegistry
+from .stream_event_bus import InProcessStreamEventBus
+from .stream_events import LangGraphStreamAdapter, StreamEventFactory, StreamEventSequence, StreamEventTarget
+from .tool_execution import ToolStreamEventEmitter
+from .sse import SseConnectionRegistry
 
 
 @dataclass(slots=True)
@@ -39,9 +35,11 @@ class GraphStreamDispatchService:
     def __init__(
         self,
         graph_service: GraphService,
+        bus: InProcessStreamEventBus,
         sse_connection_registry: SseConnectionRegistry,
     ) -> None:
         self._graph_service = graph_service
+        self._bus = bus
         self._sse_connection_registry = sse_connection_registry
         self._tasks: set[asyncio.Task[None]] = set()
 
@@ -56,6 +54,7 @@ class GraphStreamDispatchService:
         request_context: GraphRequestContext | None = None,
     ) -> GraphStreamAccepted:
         resolved_user_id = self._resolve_user_id(request_context)
+        # Pre-flight: ensure at least one SSE connection is ready to receive events.
         self._sse_connection_registry.require_connections(
             session_id=session_id,
             user_id=resolved_user_id,
@@ -99,7 +98,7 @@ class GraphStreamDispatchService:
         trace_id: str,
         request_context: GraphRequestContext | None,
     ) -> None:
-        target = RequestEventTarget(
+        target = StreamEventTarget(
             graph_name=graph_name,
             session_id=session_id,
             request_id=request_id,
@@ -107,23 +106,14 @@ class GraphStreamDispatchService:
             user_id=user_id,
             page_id=page_id,
         )
-        sequence = RequestEventSequence()
-        factory = AgentStreamEventFactory(target=target, sequence=sequence)
-        adapter = AgentStreamEventAdapter(factory=factory)
-        event_loop = asyncio.get_running_loop()
-        tool_event_emitter = ToolEventEmitter(
-            factory=factory,
-            registry=self._sse_connection_registry,
-            loop=event_loop,
-        )
-        request_context = self._attach_tool_event_emitter(
-            request_context=request_context,
-            tool_event_emitter=tool_event_emitter,
-        )
+        sequence = StreamEventSequence()
+        factory = StreamEventFactory(target=target, sequence=sequence)
+        adapter = LangGraphStreamAdapter(factory=factory)
+        tool_emitter = ToolStreamEventEmitter(factory=factory, bus=self._bus)
+        request_context = _attach_tool_stream_emitter(request_context, tool_emitter)
 
         try:
-            for event in adapter.initial_events():
-                await self._publish(target=target, event=event)
+            await self._bus.publish(factory.build_request_accepted())
 
             async for graph_event in self._graph_service.stream_events(
                 graph_name=graph_name,
@@ -131,87 +121,22 @@ class GraphStreamDispatchService:
                 session_id=session_id,
                 request_context=request_context,
             ):
-                for event in adapter.adapt(graph_event.event, graph_event.data):
-                    await self._publish(target=target, event=event)
-        except SseConnectionNotFoundError:
-            return
+                events = adapter.adapt(graph_event.event, graph_event.data)
+                await self._bus.publish_many(events)
+
         except Exception as exc:
-            await self._send_execution_error(target=target, factory=factory, exc=exc)
-
-    async def _publish(
-        self,
-        *,
-        target: RequestEventTarget,
-        event,
-    ) -> None:
-        await self._sse_connection_registry.publish_agent_event(
-            session_id=target.session_id,
-            user_id=target.user_id,
-            page_id=target.page_id,
-            event=event,
-        )
-
-    async def _send_execution_error(
-        self,
-        *,
-        target: RequestEventTarget,
-        factory: AgentStreamEventFactory,
-        exc: Exception,
-    ) -> None:
-        try:
-            await self._publish(
-                target=target,
-                event=factory.build_error(
-                    code=self._error_code(exc),
-                    message=self._error_message(exc),
-                    retriable=self._is_retriable(exc),
-                ),
+            await self._bus.publish(
+                factory.build_error(
+                    code=_error_code(exc),
+                    message=_error_message(exc),
+                    retriable=_is_retriable(exc),
+                )
             )
-        except SseConnectionNotFoundError:
-            return
-
-    @staticmethod
-    def _attach_tool_event_emitter(
-        *,
-        request_context: GraphRequestContext | None,
-        tool_event_emitter: ToolEventEmitter,
-    ) -> GraphRequestContext:
-        if request_context is None:
-            return GraphRequestContext(
-                current_user=AuthenticatedUser.anonymous(),
-                trace_id=tool_event_emitter.target.trace_id,
-                request_headers={},
-                tool_event_emitter=tool_event_emitter,
-            )
-        return replace(request_context, tool_event_emitter=tool_event_emitter)
-
-    @staticmethod
-    def _error_code(exc: Exception) -> str:
-        if isinstance(exc, GraphNotFoundError):
-            return "GRAPH_NOT_FOUND"
-        if isinstance(exc, GraphPayloadValidationError):
-            return "INVALID_PAYLOAD"
-        if isinstance(exc, ChatModelBuildError):
-            return "MODEL_BUILD_ERROR"
-        if isinstance(exc, (MCPConfigurationError, MCPToolResolutionError)):
-            return "MCP_ERROR"
-        return "AI_STREAM_ERROR"
-
-    @staticmethod
-    def _error_message(exc: Exception) -> str:
-        if isinstance(exc, GraphPayloadValidationError):
-            return str(exc.errors)
-        return str(exc)
-
-    @staticmethod
-    def _is_retriable(exc: Exception) -> bool:
-        return not isinstance(exc, GraphPayloadValidationError)
 
     @staticmethod
     def _resolve_trace_id(request_context: GraphRequestContext | None) -> str:
         if request_context is None:
             return ""
-
         request_headers = dict(request_context.request_headers)
         if request_context.trace_id:
             return request_context.trace_id
@@ -226,6 +151,42 @@ class GraphStreamDispatchService:
             return None
         candidate = user_id.strip()
         return candidate or None
+
+
+def _attach_tool_stream_emitter(
+    request_context: GraphRequestContext | None,
+    emitter: ToolStreamEventEmitter,
+) -> GraphRequestContext:
+    if request_context is None:
+        return GraphRequestContext(
+            current_user=AuthenticatedUser.anonymous(),
+            trace_id=emitter.factory.target.trace_id,
+            request_headers={},
+            tool_stream_emitter=emitter,
+        )
+    return replace(request_context, tool_stream_emitter=emitter)
+
+
+def _error_code(exc: Exception) -> str:
+    if isinstance(exc, GraphNotFoundError):
+        return "GRAPH_NOT_FOUND"
+    if isinstance(exc, GraphPayloadValidationError):
+        return "INVALID_PAYLOAD"
+    if isinstance(exc, ChatModelBuildError):
+        return "MODEL_BUILD_ERROR"
+    if isinstance(exc, (MCPConfigurationError, MCPToolResolutionError)):
+        return "MCP_ERROR"
+    return "AI_STREAM_ERROR"
+
+
+def _error_message(exc: Exception) -> str:
+    if isinstance(exc, GraphPayloadValidationError):
+        return str(exc.errors)
+    return str(exc)
+
+
+def _is_retriable(exc: Exception) -> bool:
+    return not isinstance(exc, GraphPayloadValidationError)
 
 
 def graph_stream_payload_from_input(payload: dict[str, Any] | Any) -> dict[str, Any]:
