@@ -93,7 +93,16 @@ class PlanAnalyzeNodes:
         messages: Sequence[object] = (),
     ) -> list[object]:
         if messages:
-            return [SystemMessage(content=SYSTEM_ANALYSIS_PROMPT), *list(messages)]
+            return [
+                SystemMessage(content=SYSTEM_ANALYSIS_PROMPT),
+                HumanMessage(
+                    content=ANALYSIS_PROMPT_TEMPLATE.format(
+                        query=query,
+                        plan=plan,
+                    )
+                ),
+                *list(messages),
+            ]
         return [
             SystemMessage(content=SYSTEM_ANALYSIS_PROMPT),
             HumanMessage(

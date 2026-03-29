@@ -12,6 +12,10 @@ from .graph_stream_service import (
     GraphStreamDispatchService,
     graph_stream_payload_from_input,
 )
+from .plan_analyze_summary_service import (
+    PlanAnalyzeSummaryService,
+    PlanAnalyzeSummaryStateError,
+)
 from .sse import (
     SseConnection,
     SseConnectionNotFoundError,
@@ -29,6 +33,8 @@ __all__ = [
     "GraphStreamAccepted",
     "GraphStreamDispatchService",
     "GraphStreamEvent",
+    "PlanAnalyzeSummaryService",
+    "PlanAnalyzeSummaryStateError",
     "SseConnection",
     "SseConnectionNotFoundError",
     "SseConnectionRegistry",

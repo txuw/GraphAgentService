@@ -47,6 +47,17 @@ class GraphPayloadValidationError(ValueError):
         self.errors = errors
 
 
+class GraphCheckpointUnavailableError(RuntimeError):
+    pass
+
+
+class GraphStateNotFoundError(LookupError):
+    def __init__(self, *, graph_name: str, session_id: str) -> None:
+        super().__init__(f"No checkpoint state found for graph={graph_name} session_id={session_id}")
+        self.graph_name = graph_name
+        self.session_id = session_id
+
+
 class _SessionExecutionCoordinator:
     def __init__(self) -> None:
         self._registry_lock = asyncio.Lock()
@@ -196,6 +207,47 @@ class GraphService:
             output = runtime.output_model.model_validate(final_state or {})
             yield GraphStreamEvent(event="result", data=output.model_dump())
             yield GraphStreamEvent(event="completed", data={"session_id": resolved_session_id})
+
+    async def get_latest_state(
+        self,
+        graph_name: str,
+        *,
+        session_id: str,
+    ) -> dict[str, object]:
+        runtime = self._registry.get(graph_name)
+        resolved_session_id = self._resolve_session_id(
+            session_id=session_id,
+            payload={},
+        )
+        async with self._session_execution_coordinator.hold(
+            graph_name=runtime.name,
+            session_id=resolved_session_id,
+        ):
+            try:
+                snapshot = await runtime.graph.aget_state(
+                    {
+                        "configurable": {
+                            "thread_id": self._build_thread_id(
+                                graph_name=runtime.name,
+                                session_id=resolved_session_id,
+                            )
+                        }
+                    }
+                )
+            except ValueError as exc:
+                if "No checkpointer set" in str(exc):
+                    raise GraphCheckpointUnavailableError(
+                        f"Checkpoint is not enabled for graph: {graph_name}"
+                    ) from exc
+                raise
+
+        values = snapshot.values if isinstance(snapshot.values, dict) else {}
+        if not values and snapshot.metadata is None:
+            raise GraphStateNotFoundError(
+                graph_name=runtime.name,
+                session_id=resolved_session_id,
+            )
+        return {str(key): value for key, value in values.items()}
 
     @staticmethod
     def _resolve_session_id(*, session_id: str | None, payload: dict[str, object]) -> str:

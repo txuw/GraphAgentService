@@ -8,6 +8,7 @@ from graphagentservice.schemas.analysis import TextAnalysisOutput
 from graphagentservice.schemas.image import ImageAgentOutput
 from graphagentservice.schemas.image_calories import ImageCaloriesOutput
 from graphagentservice.schemas.plan_analyze import PlanAnalyzeOutput
+from graphagentservice.schemas.plan_summary import PlanAnalyzeSummaryOutput
 from graphagentservice.schemas.tool_agent import ToolAgentOutput
 
 TResult = TypeVar("TResult")
@@ -123,6 +124,15 @@ class TextAnalysisGraphRequest(GraphRequestEnvelope):
 
 class PlanAnalyzeGraphRequest(GraphRequestEnvelope):
     query: str = Field(default="", validation_alias=AliasChoices("query", "message"))
+
+
+class PlanAnalyzeSummaryRequest(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    session_id: str = Field(
+        validation_alias=AliasChoices("session_id", "sessionId"),
+        serialization_alias="sessionId",
+    )
 
 
 class ToolAgentGraphRequest(GraphRequestEnvelope):
@@ -256,6 +266,7 @@ class ImageCaloriesChatExecuteRequest(ChatExecuteRequestBase):
 GraphInvokeResult = ResultResponse[dict[str, Any]]
 TextAnalysisInvokeResult = ResultResponse[TextAnalysisOutput]
 PlanAnalyzeInvokeResult = ResultResponse[PlanAnalyzeOutput]
+PlanAnalyzeSummaryInvokeResult = ResultResponse[PlanAnalyzeSummaryOutput]
 ToolAgentInvokeResult = ResultResponse[ToolAgentOutput]
 ImageAgentInvokeResult = ResultResponse[ImageAgentOutput]
 ImageCaloriesInvokeResult = ResultResponse[ImageCaloriesOutput]

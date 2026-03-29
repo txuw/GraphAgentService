@@ -8,6 +8,7 @@ from graphagentservice.api.dependencies import (
     build_graph_request_context,
     get_graph_service,
     get_graph_stream_dispatch_service,
+    get_plan_analyze_summary_service,
 )
 from graphagentservice.common.trace import build_trace_response_headers
 from graphagentservice.graphs.registry import GraphNotFoundError
@@ -22,16 +23,27 @@ from graphagentservice.schemas.api import (
     ImageCaloriesInvokeResult,
     PlanAnalyzeGraphRequest,
     PlanAnalyzeInvokeResult,
+    PlanAnalyzeSummaryInvokeResult,
+    PlanAnalyzeSummaryRequest,
     ResultResponse,
     TextAnalysisGraphRequest,
     TextAnalysisInvokeResult,
     ToolAgentGraphRequest,
     ToolAgentInvokeResult,
 )
-from graphagentservice.services.graph_service import GraphPayloadValidationError, GraphService
+from graphagentservice.services.graph_service import (
+    GraphCheckpointUnavailableError,
+    GraphPayloadValidationError,
+    GraphService,
+    GraphStateNotFoundError,
+)
 from graphagentservice.services.graph_stream_service import (
     GraphStreamDispatchService,
     graph_stream_payload_from_input,
+)
+from graphagentservice.services.plan_analyze_summary_service import (
+    PlanAnalyzeSummaryService,
+    PlanAnalyzeSummaryStateError,
 )
 from graphagentservice.services.sse import SseConnectionNotFoundError
 
@@ -102,6 +114,60 @@ async def invoke_plan_analyze_graph(
         session_id=_resolve_identifier(body.session_id, session_id),
         graph_service=graph_service,
     )
+
+
+@router.post(
+    "/graphs/plan-analyze/summary/invoke",
+    response_model=PlanAnalyzeSummaryInvokeResult,
+    operation_id="invokePlanAnalyzeSummary",
+)
+async def invoke_plan_analyze_summary(
+    request: Request,
+    response: Response,
+    body: PlanAnalyzeSummaryRequest,
+    session_id: str | None = Query(default=None, alias="sessionId"),
+    plan_analyze_summary_service: PlanAnalyzeSummaryService = Depends(
+        get_plan_analyze_summary_service
+    ),
+) -> ResultResponse[dict[str, Any]]:
+    request_context = build_graph_request_context(request)
+    trace_headers = build_trace_response_headers(request_context.trace_id)
+    try:
+        result = await plan_analyze_summary_service.summarize(
+            session_id=_require_non_empty_id(
+                _resolve_identifier(body.session_id, session_id),
+                field_name="sessionId",
+                headers=trace_headers,
+            ),
+            request_context=request_context,
+        )
+    except GraphStateNotFoundError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=str(exc),
+            headers=trace_headers,
+        ) from exc
+    except GraphCheckpointUnavailableError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=str(exc),
+            headers=trace_headers,
+        ) from exc
+    except PlanAnalyzeSummaryStateError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail=str(exc),
+            headers=trace_headers,
+        ) from exc
+    except ChatModelBuildError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=str(exc),
+            headers=trace_headers,
+        ) from exc
+
+    response.headers.update(trace_headers)
+    return ResultResponse(data=result)
 
 
 @router.post(

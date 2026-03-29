@@ -11,6 +11,7 @@ from graphagentservice.services import (
     ChatStreamService,
     GraphService,
     GraphStreamDispatchService,
+    PlanAnalyzeSummaryService,
     SseConnectionRegistry,
 )
 
@@ -43,6 +44,10 @@ def create_app() -> FastAPI:
         app.state.graph_stream_dispatch_service = graph_stream_dispatch_service
         app.state.chat_stream_service = ChatStreamService(
             graph_stream_dispatch_service,
+        )
+        app.state.plan_analyze_summary_service = PlanAnalyzeSummaryService(
+            graph_service,
+            llm_router,
         )
 
     app = FastAPI(
