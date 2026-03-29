@@ -40,9 +40,13 @@ class LLMRouter:
         profile: str | None = None,
         tags: Sequence[str] = (),
         metadata: Mapping[str, Any] | None = None,
+        default_headers: Mapping[str, str] | None = None,
     ):
         resolved_profile = self.resolve_profile(profile)
-        model = self._factory.create(resolved_profile)
+        model = self._factory.create(
+            resolved_profile,
+            default_headers=default_headers,
+        )
         if tags or metadata:
             model = model.with_config(
                 tags=list(tags),

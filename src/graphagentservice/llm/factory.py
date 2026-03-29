@@ -1,13 +1,13 @@
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from typing import Any
 
 from langchain_core.language_models.chat_models import BaseChatModel
 
 from .profile import LLMProfile
 
-ChatModelBuilder = Callable[[LLMProfile], BaseChatModel]
+ChatModelBuilder = Callable[[LLMProfile, Mapping[str, str] | None], BaseChatModel]
 
 
 class ChatModelBuildError(RuntimeError):
@@ -22,14 +22,22 @@ class ChatModelFactory:
     def register(self, provider_name: str, builder: ChatModelBuilder) -> None:
         self._builders[provider_name] = builder
 
-    def create(self, profile: LLMProfile) -> BaseChatModel:
+    def create(
+        self,
+        profile: LLMProfile,
+        *,
+        default_headers: Mapping[str, str] | None = None,
+    ) -> BaseChatModel:
         builder = self._builders.get(profile.provider)
         if builder is None:
             raise ChatModelBuildError(f"Unsupported llm provider: {profile.provider}")
-        return builder(profile)
+        return builder(profile, default_headers)
 
     @staticmethod
-    def _build_openai_model(profile: LLMProfile) -> BaseChatModel:
+    def _build_openai_model(
+        profile: LLMProfile,
+        default_headers: Mapping[str, str] | None = None,
+    ) -> BaseChatModel:
         try:
             from langchain_openai import ChatOpenAI
         except ImportError as exc:  # pragma: no cover - environment dependent
@@ -46,6 +54,8 @@ class ChatModelFactory:
             kwargs["api_key"] = api_key
         if profile.base_url:
             kwargs["base_url"] = profile.base_url
+        if default_headers:
+            kwargs["default_headers"] = dict(default_headers)
         if profile.temperature is not None:
             kwargs["temperature"] = profile.temperature
         if profile.max_tokens is not None:

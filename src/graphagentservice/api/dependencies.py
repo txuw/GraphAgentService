@@ -3,8 +3,11 @@ from __future__ import annotations
 from fastapi import Depends, HTTPException, Request
 
 from graphagentservice.common.auth import AuthenticatedUser, AuthenticationError, LogtoAuthenticator
+from graphagentservice.common.trace import resolve_request_trace_context
 from graphagentservice.services.chat_stream_service import ChatStreamService
 from graphagentservice.services.graph_service import GraphRequestContext, GraphService
+from graphagentservice.services.plan_analyze_summary_service import PlanAnalyzeSummaryService
+from graphagentservice.services.graph_stream_service import GraphStreamDispatchService
 from graphagentservice.services.sse import SseConnectionRegistry
 
 
@@ -14,6 +17,14 @@ def get_graph_service(request: Request) -> GraphService:
 
 def get_chat_stream_service(request: Request) -> ChatStreamService:
     return request.app.state.chat_stream_service
+
+
+def get_plan_analyze_summary_service(request: Request) -> PlanAnalyzeSummaryService:
+    return request.app.state.plan_analyze_summary_service
+
+
+def get_graph_stream_dispatch_service(request: Request) -> GraphStreamDispatchService:
+    return request.app.state.graph_stream_dispatch_service
 
 
 def get_sse_connection_registry(request: Request) -> SseConnectionRegistry:
@@ -45,7 +56,9 @@ def get_current_user(request: Request) -> AuthenticatedUser:
 
 
 def build_graph_request_context(request: Request) -> GraphRequestContext:
+    trace_context = resolve_request_trace_context(request.headers)
     return GraphRequestContext(
         current_user=get_current_user(request),
-        request_headers=dict(request.headers),
+        trace_id=trace_context.trace_id,
+        request_headers=trace_context.request_headers,
     )

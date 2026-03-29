@@ -13,7 +13,7 @@ from .state import ImageAnalyzeCaloriesGraphState,ImageAnalyzeCaloriesGraphInput
 
 
 class ImageAnalyzeCaloriesGraphBuilder:
-    name = "image_analyze_calories_graph"
+    name = "image-analyze-calories"
     description = "Multimodal graph that answers a user question about an image URL."
 
     def __init__(

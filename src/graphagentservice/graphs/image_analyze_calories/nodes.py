@@ -21,13 +21,12 @@ class ImageAnalyzeCaloriesAgentNodes:
             state: ImageAnalyzeCaloriesGraphState,
             runtime: Runtime[GraphRunContext],
     ) -> ImageAnalyzeCaloriesGraphState:
-        model = runtime.context.image_model(
+        model = runtime.context.structured_model_with_json_object(
+            schema=CalorieInfo,
             binding=self._llm_binding,
             tags=("multimodal",),
         )
-        response = await model.with_structured_output(
-            CalorieInfo, method='json_schema'
-        ).ainvoke(self.build_messages(
+        response = await model.ainvoke(self.build_messages(
             prompt=state.get("text", "").strip() or ANALYSIS_PROMPTS,
             image_url=state["image_url"].strip(),
         ))

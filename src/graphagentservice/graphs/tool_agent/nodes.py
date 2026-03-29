@@ -60,8 +60,8 @@ class ToolAgentNodes:
         state: ToolAgentGraphState,
         runtime: Runtime[GraphRunContext],
     ) -> dict[str, list[ToolMessage]]:
-        tools = await self._resolve_tools(runtime)
-        tool_node = ToolNode(tools)
+        resolved_tools = await self._resolve_tools(runtime)
+        tool_node = _build_tool_node(resolved_tools, runtime)
         result = await tool_node.ainvoke(state, runtime=runtime)
         if isinstance(result, dict):
             return result
@@ -144,3 +144,15 @@ class ToolAgentNodes:
                     parts.append(str(block))
             return "\n".join(parts)
         return str(content)
+
+
+def _build_tool_node(
+    tools: list[BaseTool],
+    runtime: Runtime[GraphRunContext],
+) -> ToolNode:
+    from graphagentservice.services.tool_execution import ObservedToolNode
+
+    emitter = runtime.context.tool_stream_emitter
+    if emitter is not None:
+        return ObservedToolNode(tools, emitter=emitter)
+    return ToolNode(tools)

@@ -1,34 +1,44 @@
 from __future__ import annotations
 
 import asyncio
+import inspect
 import signal
 import threading
 from contextlib import asynccontextmanager
 from types import FrameType
-from typing import Any, Callable
+from typing import Any, Awaitable, Callable
 
 from fastapi import FastAPI
 
+from graphagentservice.common.checkpoint import CheckpointProvider
 from graphagentservice.services.sse import SseConnectionRegistry
 
 
 def create_app_lifespan(
     *,
+    app_initializer: Callable[[FastAPI], Awaitable[None] | None] | None = None,
+    checkpoint_provider: CheckpointProvider,
     sse_connection_registry: SseConnectionRegistry,
 ) -> Callable[[FastAPI], Any]:
     @asynccontextmanager
-    async def lifespan(_: FastAPI):
+    async def lifespan(app: FastAPI):
         # Uvicorn 会先等待活跃连接结束，再进入 FastAPI 的 shutdown 流程，
         # 因此这里需要在进程收到停止信号时尽早关闭 SSE 连接。
         restore_signal_handlers = _install_uvicorn_signal_bridge(
             registry=sse_connection_registry,
         )
         try:
+            await checkpoint_provider.startup()
+            if app_initializer is not None:
+                initialized = app_initializer(app)
+                if inspect.isawaitable(initialized):
+                    await initialized
             yield
         finally:
             restore_signal_handlers()
             # 这里保留一次兜底清理，覆盖非信号触发的退出路径和测试场景。
             await sse_connection_registry.close_all()
+            await checkpoint_provider.shutdown()
 
     return lifespan
 

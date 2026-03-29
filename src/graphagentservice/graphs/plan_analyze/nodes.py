@@ -73,8 +73,8 @@ class PlanAnalyzeNodes:
         state: PlanAnalyzeGraphState,
         runtime: Runtime[GraphRunContext],
     ) -> dict[str, list[object]]:
-        tools = await self._resolve_tools(runtime)
-        tool_node = ToolNode(tools)
+        resolved_tools = await self._resolve_tools(runtime)
+        tool_node = _build_tool_node(resolved_tools, runtime)
         result = await tool_node.ainvoke(state, runtime=runtime)
         if isinstance(result, dict):
             return result
@@ -93,7 +93,16 @@ class PlanAnalyzeNodes:
         messages: Sequence[object] = (),
     ) -> list[object]:
         if messages:
-            return [SystemMessage(content=SYSTEM_ANALYSIS_PROMPT), *list(messages)]
+            return [
+                SystemMessage(content=SYSTEM_ANALYSIS_PROMPT),
+                HumanMessage(
+                    content=ANALYSIS_PROMPT_TEMPLATE.format(
+                        query=query,
+                        plan=plan,
+                    )
+                ),
+                *list(messages),
+            ]
         return [
             SystemMessage(content=SYSTEM_ANALYSIS_PROMPT),
             HumanMessage(
@@ -136,3 +145,15 @@ class PlanAnalyzeNodes:
                     parts.append(str(block))
             return "\n".join(parts).strip()
         return str(content).strip()
+
+
+def _build_tool_node(
+    tools: list[BaseTool],
+    runtime: Runtime[GraphRunContext],
+) -> ToolNode:
+    from graphagentservice.services.tool_execution import ObservedToolNode
+
+    emitter = runtime.context.tool_stream_emitter
+    if emitter is not None:
+        return ObservedToolNode(tools, emitter=emitter)
+    return ToolNode(tools)
