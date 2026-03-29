@@ -4,6 +4,7 @@ from graphagentservice.api import router as api_router
 from graphagentservice.common.auth import LogtoAuthenticator
 from graphagentservice.common import create_checkpoint_provider, get_settings
 from graphagentservice.common.lifecycle import create_app_lifespan
+from graphagentservice.common.middleware import RequestLoggingMiddleware
 from graphagentservice.graphs import create_graph_registry
 from graphagentservice.llm import LLMRouter
 from graphagentservice.mcp import MCPSettings, MCPToolResolver
@@ -65,6 +66,7 @@ def create_app() -> FastAPI:
             sse_connection_registry=sse_connection_registry,
         ),
     )
+    app.add_middleware(RequestLoggingMiddleware)
     app.state.sse_connection_registry = sse_connection_registry
     app.state.logto_authenticator = logto_authenticator
     app.include_router(api_router)

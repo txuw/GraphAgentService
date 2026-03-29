@@ -1,11 +1,14 @@
 from __future__ import annotations
 
 import asyncio
+import logging
+import time
 from dataclasses import dataclass, replace
 from typing import Any
 from uuid import uuid4
 
 from graphagentservice.common.auth import AuthenticatedUser
+from graphagentservice.common.logging import set_log_trace_id
 from graphagentservice.common.trace import resolve_request_trace_context
 from graphagentservice.graphs.registry import GraphNotFoundError
 from graphagentservice.llm import ChatModelBuildError
@@ -20,6 +23,8 @@ from .stream_event_bus import InProcessStreamEventBus
 from .stream_events import LangGraphStreamAdapter, StreamEventFactory, StreamEventSequence, StreamEventTarget
 from .tool_execution import ToolStreamEventEmitter
 from .sse import SseConnectionRegistry
+
+_logger = logging.getLogger(__name__)
 
 
 @dataclass(slots=True)
@@ -63,6 +68,9 @@ class GraphStreamDispatchService:
 
         resolved_request_id = request_id or uuid4().hex
         resolved_trace_id = self._resolve_trace_id(request_context)
+
+        # asyncio.create_task copies the current context (including trace_id ContextVar)
+        # so the background task automatically inherits the trace-id set by the middleware.
         task = asyncio.create_task(
             self._run_stream(
                 graph_name=graph_name,
@@ -78,6 +86,13 @@ class GraphStreamDispatchService:
         self._tasks.add(task)
         task.add_done_callback(self._tasks.discard)
 
+        _logger.info(
+            "Graph stream task created  graph=%s  session=%s  page=%s  requestId=%s",
+            graph_name,
+            session_id,
+            page_id or "-",
+            resolved_request_id,
+        )
         return GraphStreamAccepted(
             graph_name=graph_name,
             session_id=session_id,
@@ -98,6 +113,12 @@ class GraphStreamDispatchService:
         trace_id: str,
         request_context: GraphRequestContext | None,
     ) -> None:
+        # Explicitly bind trace_id so that log records emitted from this
+        # background task carry the correct trace-id regardless of how the
+        # task was scheduled.
+        if trace_id:
+            set_log_trace_id(trace_id)
+
         target = StreamEventTarget(
             graph_name=graph_name,
             session_id=session_id,
@@ -112,6 +133,13 @@ class GraphStreamDispatchService:
         tool_emitter = ToolStreamEventEmitter(factory=factory, bus=self._bus)
         request_context = _attach_tool_stream_emitter(request_context, tool_emitter)
 
+        _logger.info(
+            "Graph stream task started  graph=%s  session=%s  requestId=%s",
+            graph_name,
+            session_id,
+            request_id,
+        )
+        t0 = time.perf_counter()
         try:
             await self._bus.publish(factory.build_request_accepted())
 
@@ -125,12 +153,31 @@ class GraphStreamDispatchService:
                 await self._bus.publish_many(events)
 
         except Exception as exc:
+            elapsed_ms = (time.perf_counter() - t0) * 1000
+            _logger.error(
+                "Graph stream task failed  graph=%s  session=%s  requestId=%s  error=%s  elapsed=%.0fms",
+                graph_name,
+                session_id,
+                request_id,
+                exc,
+                elapsed_ms,
+                exc_info=True,
+            )
             await self._bus.publish(
                 factory.build_error(
                     code=_error_code(exc),
                     message=_error_message(exc),
                     retriable=_is_retriable(exc),
                 )
+            )
+        else:
+            elapsed_ms = (time.perf_counter() - t0) * 1000
+            _logger.info(
+                "Graph stream task completed  graph=%s  session=%s  requestId=%s  elapsed=%.0fms",
+                graph_name,
+                session_id,
+                request_id,
+                elapsed_ms,
             )
 
     @staticmethod

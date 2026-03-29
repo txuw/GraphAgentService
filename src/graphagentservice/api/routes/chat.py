@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 from uuid import uuid4
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request, Response, status
@@ -12,6 +13,8 @@ from graphagentservice.api.dependencies import (
     get_sse_connection_registry,
 )
 from graphagentservice.common.trace import build_trace_response_headers
+
+_logger = logging.getLogger(__name__)
 from graphagentservice.schemas.api import (
     ChatExecuteRequest,
     ChatExecuteRequestBase,
@@ -48,6 +51,13 @@ async def connect_sse(
     resolved_session_id = _resolve_optional_id(session_id)
     resolved_page_id = _resolve_optional_id(page_id)
     current_user = get_current_user(request)
+    _logger.info(
+        "SSE connect  session=%s  page=%s  user=%s  lastEventId=%s",
+        resolved_session_id,
+        resolved_page_id,
+        current_user.user_id or "anonymous",
+        last_event_id or "-",
+    )
     connection = await sse_connection_registry.register(
         session_id=resolved_session_id,
         page_id=resolved_page_id,
@@ -55,6 +65,7 @@ async def connect_sse(
         last_event_id=last_event_id,
     )
     await sse_connection_registry.send_connected_event(connection)
+    _logger.debug("SSE connection registered  session=%s  page=%s", resolved_session_id, resolved_page_id)
 
     async def event_generator():
         async for chunk in sse_connection_registry.event_stream(
@@ -187,6 +198,13 @@ async def execute_chat(
 ) -> ChatExecuteResponse:
     request_context = build_graph_request_context(request)
     trace_headers = build_trace_response_headers(request_context.trace_id)
+    _logger.info(
+        "Chat execute  graph=%s  session=%s  page=%s  requestId=%s",
+        body.graph_name,
+        body.session_id or "-",
+        body.page_id or "-",
+        body.request_id or "-",
+    )
     try:
         accepted = await chat_stream_service.execute(
             graph_name=body.graph_name,
@@ -197,12 +215,25 @@ async def execute_chat(
             request_context=request_context,
         )
     except SseConnectionNotFoundError as exc:
+        _logger.warning(
+            "Chat execute rejected – SSE connection not found  graph=%s  session=%s  error=%s",
+            body.graph_name,
+            body.session_id or "-",
+            exc,
+        )
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=str(exc),
             headers=trace_headers,
         ) from exc
 
+    _logger.info(
+        "Chat execute accepted  graph=%s  session=%s  page=%s  requestId=%s",
+        accepted.graph_name,
+        accepted.session_id,
+        accepted.page_id or "-",
+        accepted.request_id,
+    )
     response.headers.update(trace_headers)
     return ChatExecuteResponse(
         graph_name=accepted.graph_name,
@@ -223,6 +254,13 @@ async def _execute_chat(
     request_context = build_graph_request_context(request)
     trace_headers = build_trace_response_headers(request_context.trace_id)
     payload = body.graph_payload()
+    _logger.info(
+        "Chat execute  graph=%s  session=%s  page=%s  requestId=%s",
+        graph_name,
+        body.session_id or "-",
+        body.page_id or "-",
+        body.request_id or "-",
+    )
     try:
         accepted = await chat_stream_service.execute(
             graph_name=graph_name,
@@ -233,12 +271,25 @@ async def _execute_chat(
             request_context=request_context,
         )
     except SseConnectionNotFoundError as exc:
+        _logger.warning(
+            "Chat execute rejected – SSE connection not found  graph=%s  session=%s  error=%s",
+            graph_name,
+            body.session_id or "-",
+            exc,
+        )
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=str(exc),
             headers=trace_headers,
         ) from exc
 
+    _logger.info(
+        "Chat execute accepted  graph=%s  session=%s  page=%s  requestId=%s",
+        accepted.graph_name,
+        accepted.session_id,
+        accepted.page_id or "-",
+        accepted.request_id,
+    )
     response.headers.update(trace_headers)
     return ChatExecuteResponse(
         graph_name=accepted.graph_name,

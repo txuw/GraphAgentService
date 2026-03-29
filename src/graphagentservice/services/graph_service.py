@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
+import time
 from contextlib import asynccontextmanager
 from collections.abc import AsyncIterator
 from dataclasses import dataclass
@@ -17,6 +19,8 @@ from graphagentservice.graphs.registry import GraphRegistry
 from graphagentservice.graphs.runtime import GraphRunContext, GraphRuntime, ToolEventEmitterProtocol
 from graphagentservice.llm.router import LLMRouter
 from graphagentservice.mcp import MCPToolResolver
+
+_logger = logging.getLogger(__name__)
 
 
 @dataclass(slots=True)
@@ -132,18 +136,43 @@ class GraphService:
         payload_dict = self._payload_to_dict(payload)
         graph_input = self._validate_payload(runtime, payload_dict)
         resolved_session_id = self._resolve_session_id(session_id=session_id, payload=payload_dict)
-        async with self._session_execution_coordinator.hold(
-            graph_name=runtime.name,
-            session_id=resolved_session_id,
-        ):
-            state = await runtime.graph.ainvoke(
-                graph_input.model_dump(),
-                config=self._build_graph_config(
-                    runtime=runtime,
-                    session_id=resolved_session_id,
-                ),
-                context=self._build_context(runtime, request_context=request_context),
+        thread_id = self._build_thread_id(graph_name=runtime.name, session_id=resolved_session_id)
+        _logger.info(
+            "Graph invoke started  graph=%s  session=%s  threadId=%s",
+            graph_name,
+            resolved_session_id,
+            thread_id,
+        )
+        t0 = time.perf_counter()
+        try:
+            async with self._session_execution_coordinator.hold(
+                graph_name=runtime.name,
+                session_id=resolved_session_id,
+            ):
+                state = await runtime.graph.ainvoke(
+                    graph_input.model_dump(),
+                    config=self._build_graph_config(
+                        runtime=runtime,
+                        session_id=resolved_session_id,
+                    ),
+                    context=self._build_context(runtime, request_context=request_context),
+                )
+        except Exception:
+            elapsed_ms = (time.perf_counter() - t0) * 1000
+            _logger.exception(
+                "Graph invoke failed  graph=%s  session=%s  elapsed=%.0fms",
+                graph_name,
+                resolved_session_id,
+                elapsed_ms,
             )
+            raise
+        elapsed_ms = (time.perf_counter() - t0) * 1000
+        _logger.info(
+            "Graph invoke completed  graph=%s  session=%s  elapsed=%.0fms",
+            graph_name,
+            resolved_session_id,
+            elapsed_ms,
+        )
         return GraphInvocationResult(
             graph_name=graph_name,
             session_id=resolved_session_id,
@@ -176,6 +205,15 @@ class GraphService:
         payload_dict = self._payload_to_dict(payload)
         graph_input = self._validate_payload(runtime, payload_dict)
         resolved_session_id = self._resolve_session_id(session_id=session_id, payload=payload_dict)
+        thread_id = self._build_thread_id(graph_name=runtime.name, session_id=resolved_session_id)
+        _logger.info(
+            "Graph stream started  graph=%s  session=%s  threadId=%s",
+            graph_name,
+            resolved_session_id,
+            thread_id,
+        )
+        t0 = time.perf_counter()
+        chunk_count = 0
         async with self._session_execution_coordinator.hold(
             graph_name=runtime.name,
             session_id=resolved_session_id,
@@ -195,6 +233,7 @@ class GraphService:
                 stream_mode=list(runtime.stream_modes),
                 version="v2",
             ):
+                chunk_count += 1
                 chunk_type = str(chunk["type"])
                 if chunk_type == "values":
                     final_state = chunk["data"]
@@ -208,6 +247,15 @@ class GraphService:
             yield GraphStreamEvent(event="result", data=output.model_dump())
             yield GraphStreamEvent(event="completed", data={"session_id": resolved_session_id})
 
+        elapsed_ms = (time.perf_counter() - t0) * 1000
+        _logger.info(
+            "Graph stream completed  graph=%s  session=%s  chunks=%d  elapsed=%.0fms",
+            graph_name,
+            resolved_session_id,
+            chunk_count,
+            elapsed_ms,
+        )
+
     async def get_latest_state(
         self,
         graph_name: str,
@@ -219,6 +267,7 @@ class GraphService:
             session_id=session_id,
             payload={},
         )
+        _logger.debug("Get latest state  graph=%s  session=%s", graph_name, resolved_session_id)
         async with self._session_execution_coordinator.hold(
             graph_name=runtime.name,
             session_id=resolved_session_id,

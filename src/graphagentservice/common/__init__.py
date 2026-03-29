@@ -16,6 +16,13 @@ from .config import (
     Settings,
     get_settings,
 )
+from .logging import (
+    build_log_config,
+    configure_logging,
+    get_log_trace_id,
+    reset_log_trace_id,
+    set_log_trace_id,
+)
 
 __all__ = [
     "AppSettings",
@@ -30,6 +37,11 @@ __all__ = [
     "ObservabilitySettings",
     "PostgresCheckpointProvider",
     "Settings",
+    "build_log_config",
+    "configure_logging",
     "create_checkpoint_provider",
+    "get_log_trace_id",
     "get_settings",
+    "reset_log_trace_id",
+    "set_log_trace_id",
 ]

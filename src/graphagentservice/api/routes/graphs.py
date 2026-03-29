@@ -1,8 +1,11 @@
 from __future__ import annotations
 
+import logging
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response, status
+
+_logger = logging.getLogger(__name__)
 
 from graphagentservice.api.dependencies import (
     build_graph_request_context,
@@ -444,6 +447,7 @@ async def _invoke_graph(
 ) -> ResultResponse[dict[str, Any]]:
     request_context = build_graph_request_context(request)
     trace_headers = build_trace_response_headers(request_context.trace_id)
+    _logger.info("Graph invoke  graph=%s  session=%s", graph_name, session_id or "-")
     try:
         result = await graph_service.invoke(
             graph_name=graph_name,
@@ -452,24 +456,41 @@ async def _invoke_graph(
             request_context=request_context,
         )
     except GraphNotFoundError as exc:
+        _logger.warning("Graph invoke rejected – graph not found  graph=%s  error=%s", graph_name, exc)
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=str(exc),
             headers=trace_headers,
         ) from exc
     except GraphPayloadValidationError as exc:
+        _logger.warning(
+            "Graph invoke rejected – payload invalid  graph=%s  errors=%s",
+            graph_name,
+            exc.errors,
+        )
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
             detail=exc.errors,
             headers=trace_headers,
         ) from exc
     except (ChatModelBuildError, MCPConfigurationError, MCPToolResolutionError) as exc:
+        _logger.error(
+            "Graph invoke failed  graph=%s  error=%s",
+            graph_name,
+            exc,
+            exc_info=True,
+        )
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=str(exc),
             headers=trace_headers,
         ) from exc
 
+    _logger.info(
+        "Graph invoke completed  graph=%s  session=%s",
+        result.graph_name,
+        result.session_id,
+    )
     response.headers.update(trace_headers)
     return ResultResponse(data=result.output.model_dump())
 
@@ -495,6 +516,13 @@ async def _dispatch_graph_stream(
     resolved_page_id = _resolve_optional_id(page_id)
     resolved_request_id = _resolve_optional_id(request_id)
 
+    _logger.info(
+        "Graph stream dispatch  graph=%s  session=%s  page=%s  requestId=%s",
+        graph_name,
+        resolved_session_id,
+        resolved_page_id or "-",
+        resolved_request_id or "-",
+    )
     try:
         accepted = await graph_stream_dispatch_service.execute(
             graph_name=graph_name,
@@ -505,12 +533,24 @@ async def _dispatch_graph_stream(
             request_context=request_context,
         )
     except SseConnectionNotFoundError as exc:
+        _logger.warning(
+            "Graph stream dispatch rejected – SSE connection not found  graph=%s  session=%s  error=%s",
+            graph_name,
+            resolved_session_id,
+            exc,
+        )
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=str(exc),
             headers=trace_headers,
         ) from exc
 
+    _logger.info(
+        "Graph stream accepted  graph=%s  session=%s  requestId=%s",
+        accepted.graph_name,
+        accepted.session_id,
+        accepted.request_id,
+    )
     response.headers.update(trace_headers)
     return ResultResponse(data=accepted.request_id)
 

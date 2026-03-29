@@ -35,7 +35,13 @@ class SseStreamEventSink:
                 event=wire,
             )
         except SseConnectionNotFoundError:
-            pass
+            _logger.debug(
+                "SSE connection not found – event dropped  session=%s  page=%s  kind=%s  requestId=%s",
+                event.target.session_id,
+                event.target.page_id or "-",
+                event.kind.value,
+                event.target.request_id,
+            )
 
 
 def _project(event: StreamEvent) -> AgentStreamEvent:

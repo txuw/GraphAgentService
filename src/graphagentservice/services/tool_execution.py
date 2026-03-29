@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import logging
+import time
 from collections.abc import Sequence
 from typing import TYPE_CHECKING, Any
 
@@ -10,6 +12,8 @@ from langgraph.prebuilt import ToolNode
 if TYPE_CHECKING:
     from .stream_event_bus import StreamEventSink
     from .stream_events import StreamEventFactory
+
+_logger = logging.getLogger(__name__)
 
 
 class ToolStreamEventEmitter:
@@ -77,16 +81,30 @@ class ObservedToolNode(ToolNode):
         last = messages[-1] if messages else None
         tool_calls: list[dict[str, Any]] = list(getattr(last, "tool_calls", []))
 
+        tool_names = [str(c.get("name", "unknown")) for c in tool_calls]
+        if tool_names:
+            _logger.info("Tool calls starting  tools=[%s]  count=%d", ", ".join(tool_names), len(tool_names))
+
         for call in tool_calls:
             await self._emitter.emit_start(str(call.get("name", "unknown")))
 
+        t0 = time.perf_counter()
         try:
             result = await super().ainvoke(input, config, **kwargs)
         except Exception as exc:
+            elapsed_ms = (time.perf_counter() - t0) * 1000
+            _logger.error(
+                "Tool invocation exception  tools=[%s]  error=%s  elapsed=%.0fms",
+                ", ".join(tool_names),
+                exc,
+                elapsed_ms,
+                exc_info=True,
+            )
             for call in tool_calls:
                 await self._emitter.emit_error(str(call.get("name", "unknown")), str(exc))
             raise
 
+        elapsed_ms = (time.perf_counter() - t0) * 1000
         output_messages = result.get("messages", []) if isinstance(result, dict) else []
         error_call_ids: set[str] = {
             str(msg.tool_call_id)
@@ -99,13 +117,29 @@ class ObservedToolNode(ToolNode):
             if isinstance(msg, ToolMessage) and msg.status == "error"
         }
 
+        failed_names: list[str] = []
         for call in tool_calls:
             call_id = str(call.get("id", ""))
             name = str(call.get("name", "unknown"))
             if call_id in error_call_ids:
+                failed_names.append(name)
                 await self._emitter.emit_error(name, id_to_error_text.get(call_id, "tool error"))
             else:
                 await self._emitter.emit_done(name)
+
+        if failed_names:
+            _logger.warning(
+                "Tool calls completed with errors  tools=[%s]  failed=[%s]  elapsed=%.0fms",
+                ", ".join(tool_names),
+                ", ".join(failed_names),
+                elapsed_ms,
+            )
+        elif tool_names:
+            _logger.info(
+                "Tool calls completed  tools=[%s]  elapsed=%.0fms",
+                ", ".join(tool_names),
+                elapsed_ms,
+            )
 
         return result
 

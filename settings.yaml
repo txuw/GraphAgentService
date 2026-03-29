@@ -4,6 +4,8 @@ app:
   host: 0.0.0.0
   port: 8000
   reload: false
+  # Logging level for the application and uvicorn loggers.
+  # Valid values: debug | info | warning | error | critical
   log_level: info
 
 llm:
@@ -85,4 +87,6 @@ graphs:
     mcp_servers: ["sport"]
 
 observability:
+  # When true, full request/response payloads are logged at DEBUG level.
+  # Keep false in production to avoid logging sensitive user data.
   log_payloads: false
