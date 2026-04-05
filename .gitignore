@@ -32,4 +32,4 @@ deploy/k3s/.env
 build/
 dist/
 *.egg-info/
-/.claude/
+.claude/
