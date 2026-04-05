@@ -1,0 +1,240 @@
+{
+  "version": "1.0.0",
+  "generated_at": "2026-04-04T00:00:00Z",
+  "project": {
+    "name": "GraphAgentService",
+    "description": "FastAPI + LangGraph 服务端脚手架",
+    "root_path": "D:\\code\\GraphAgentService",
+    "language": "Python",
+    "version": "0.1.0"
+  },
+  "architecture": {
+    "type": "modular_monolith",
+    "layers": [
+      "api",
+      "services",
+      "graphs",
+      "llm",
+      "mcp",
+      "tools",
+      "common"
+    ]
+  },
+  "tech_stack": {
+    "language": "Python 3.11+",
+    "web_framework": "FastAPI",
+    "graph_engine": "LangGraph 0.6+",
+    "llm_integration": "LangChain + LangChain OpenAI",
+    "config_management": "Dynaconf",
+    "dependency_manager": "uv",
+    "auth": "Logto (optional)",
+    "checkpoint": "PostgreSQL (optional) or memory",
+    "mcp_client": "langchain-mcp-adapters"
+  },
+  "modules": [
+    {
+      "name": "graphs",
+      "path": "src/graphagentservice/graphs",
+      "description": "Graph 编排层，负责 Graph 注册、运行时上下文管理",
+      "entry_points": [
+        "registry.py",
+        "runtime.py"
+      ],
+      "submodules": [
+        {
+          "name": "text_analysis",
+          "path": "src/graphagentservice/graphs/text_analysis",
+          "description": "文本分析 Graph，演示结构化输出"
+        },
+        {
+          "name": "tool_agent",
+          "path": "src/graphagentservice/graphs/tool_agent",
+          "description": "工具调用 Agent，演示工具循环"
+        },
+        {
+          "name": "plan_analyze",
+          "path": "src/graphagentservice/graphs/plan_analyze",
+          "description": "计划分析 Graph，演示 MCP 集成"
+        },
+        {
+          "name": "image_agent",
+          "path": "src/graphagentservice/graphs/image_agent",
+          "description": "图像 Agent，支持多模态输入"
+        },
+        {
+          "name": "image_analyze_calories",
+          "path": "src/graphagentservice/graphs/image_analyze_calories",
+          "description": "卡路里分析 Graph"
+        }
+      ],
+      "interfaces": [
+        "GraphRegistry",
+        "GraphRuntime",
+        "GraphRunContext"
+      ],
+      "tests": [],
+      "config_files": [],
+      "documentation": "CLAUDE.md"
+    },
+    {
+      "name": "llm",
+      "path": "src/graphagentservice/llm",
+      "description": "LLM 模块，负责模型配置、路由与实例化",
+      "entry_points": [
+        "profile.py",
+        "router.py",
+        "factory.py"
+      ],
+      "submodules": [],
+      "interfaces": [
+        "LLMProfile",
+        "LLMRouter",
+        "ChatModelFactory"
+      ],
+      "tests": [],
+      "config_files": [],
+      "documentation": "CLAUDE.md"
+    },
+    {
+      "name": "mcp",
+      "path": "src/graphagentservice/mcp",
+      "description": "MCP 模块，负责远端工具集成",
+      "entry_points": [
+        "models.py",
+        "client.py",
+        "resolver.py"
+      ],
+      "submodules": [],
+      "interfaces": [
+        "MCPSettings",
+        "MCPClientFactory",
+        "MCPToolResolver"
+      ],
+      "tests": [],
+      "config_files": [],
+      "documentation": "CLAUDE.md"
+    },
+    {
+      "name": "api",
+      "path": "src/graphagentservice/api",
+      "description": "API 层，负责 HTTP 协议映射",
+      "entry_points": [
+        "routes/graphs.py",
+        "routes/chat.py",
+        "dependencies.py"
+      ],
+      "submodules": [],
+      "interfaces": [
+        "router",
+        "build_graph_request_context"
+      ],
+      "tests": [],
+      "config_files": [],
+      "documentation": null
+    },
+    {
+      "name": "services",
+      "path": "src/graphagentservice/services",
+      "description": "服务层，负责业务编排与流式输出",
+      "entry_points": [
+        "graph_service.py",
+        "graph_stream_service.py"
+      ],
+      "submodules": [],
+      "interfaces": [
+        "GraphService",
+        "GraphStreamDispatchService"
+      ],
+      "tests": [],
+      "config_files": [],
+      "documentation": null
+    },
+    {
+      "name": "tools",
+      "path": "src/graphagentservice/tools",
+      "description": "可复用工具集合",
+      "entry_points": [
+        "registry.py"
+      ],
+      "submodules": [],
+      "interfaces": [
+        "build_toolset"
+      ],
+      "tests": [],
+      "config_files": [],
+      "documentation": null
+    },
+    {
+      "name": "common",
+      "path": "src/graphagentservice/common",
+      "description": "公共基础设施",
+      "entry_points": [
+        "config.py",
+        "auth/service.py",
+        "checkpoint.py"
+      ],
+      "submodules": [],
+      "interfaces": [
+        "Settings",
+        "LogtoAuthenticator",
+        "CheckpointProvider"
+      ],
+      "tests": [],
+      "config_files": [],
+      "documentation": null
+    }
+  ],
+  "coverage": {
+    "total_files": 75,
+    "scanned_files": 75,
+    "coverage_percentage": 100,
+    "ignored_patterns": [
+      ".venv/**",
+      "__pycache__/**",
+      "*.pyc",
+      ".git/**",
+      "*.lock"
+    ],
+    "ignored_stats": {
+      "total_ignored": 0,
+      "by_pattern": {}
+    }
+  },
+  "gaps": [],
+  "next_steps": [
+    "补充各 Graph 子模块的详细文档",
+    "添加 API 层和服务层的文档",
+    "补充测试用例文档",
+    "添加部署与运维文档"
+  ],
+  "documentation_files": [
+    {
+      "path": "CLAUDE.md",
+      "type": "root",
+      "title": "GraphAgentService 主文档"
+    },
+    {
+      "path": "src/graphagentservice/graphs/CLAUDE.md",
+      "type": "module",
+      "title": "Graphs 模块文档"
+    },
+    {
+      "path": "src/graphagentservice/llm/CLAUDE.md",
+      "type": "module",
+      "title": "LLM 模块文档"
+    },
+    {
+      "path": "src/graphagentservice/mcp/CLAUDE.md",
+      "type": "module",
+      "title": "MCP 模块文档"
+    }
+  ],
+  "key_patterns": {
+    "graph_development": "Builder 模式 + StateGraph + GraphRuntime",
+    "llm_binding": "binding → alias → profile 三层配置",
+    "mcp_integration": "请求级动态工具解析",
+    "config_loading": "settings.yaml → .env → 环境变量",
+    "streaming": "SSE + LangGraph astream v2"
+  },
+  "truncated": false
+}
