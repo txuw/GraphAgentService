@@ -32,7 +32,7 @@ llm:
       temperature: 0.1
       timeout: 60.0
       max_tokens: null
-      provider_options: { }
+      provider_options: {}
 
 graph:
   default_name: text-analysis
@@ -49,9 +49,9 @@ tools:
 
 logto:
   enabled: false
-  issuer_uri:
-  audience:
-  jwk_set_uri:
+  issuer_uri: null
+  audience: null
+  jwk_set_uri: null
 
 mcp:
   enabled: true
@@ -61,9 +61,9 @@ mcp:
     sport:
       enabled: true
       transport: streamable_http
-      url: "http://api.txuw.top/mcp-servers/sport-assistant-mcp"
+      url: null
       headers: {}
-      server_description: "	sport-assistant-mcp"
+      server_description: "sport-assistant-mcp"
 
 graphs:
   text-analysis:
@@ -83,6 +83,32 @@ graphs:
     llm_bindings:
       agent: tool_calling
     mcp_servers: ["sport"]
+
+# 全局记忆服务配置（Mem0）
+memory:
+  enabled: false
+  llm:
+    provider: openai
+    model: gpt-5-nano-2025-08-07
+    temperature: 0.1
+    max_tokens: 1500
+  embedder:
+    provider: openai
+    model: text-embedding-3-small
+  vector_store:
+    provider: milvus
+    collection_name: mem0
+    embedding_model_dims: 1536
+    url: null
+    token: null
+    metric_type: L2
+    db_name: default
+  recall:
+    max_results: 5
+    min_score: 0.3
+  commit:
+    queue_maxsize: 256
+    worker_count: 2
 
 observability:
   log_payloads: false

@@ -18,6 +18,7 @@ GraphSettings = DynaBox
 LogtoSettings = DynaBox
 MCPSettings = DynaBox
 ObservabilitySettings = DynaBox
+MemorySettings = DynaBox
 
 
 def _parse_env_value(value: str) -> Any:

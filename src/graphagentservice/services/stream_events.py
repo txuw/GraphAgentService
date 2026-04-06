@@ -15,6 +15,7 @@ class StreamEventKind(str, Enum):
     TOOL_ERROR = "tool_error"
     AI_DONE = "ai_done"
     AI_ERROR = "ai_error"
+    INTERRUPT = "interrupt"
 
 
 @dataclass(frozen=True, slots=True)
@@ -148,15 +149,31 @@ class StreamEventFactory:
             retriable=False,
         )
 
+    def build_interrupt(self, *, questions_json: str) -> StreamEvent:
+        """构建中断事件（ask_user_questions 工具触发）。"""
+        seq = self._sequence.next()
+        return StreamEvent(
+            target=self._target,
+            kind=StreamEventKind.INTERRUPT,
+            seq=seq,
+            event_id=f"{self._target.request_id}:interrupt:{seq}",
+            content=questions_json,
+            code="INTERRUPTED",
+            message="等待用户回答",
+            retriable=False,
+        )
+
     @staticmethod
     def status_for_node(node_name: str) -> tuple[str, str]:
         normalized = node_name.lower()
         mapping = {
             "prepare": ("GRAPH_NODE_UPDATED", "已接收请求，准备开始处理"),
             "preprocess": ("GRAPH_NODE_UPDATED", "已接收请求，正在整理输入"),
+            "memory_recall": ("GRAPH_NODE_UPDATED", "正在检索相关记忆"),
             "analyze": ("INTENT_RESOLVED", "已进入分析阶段，正在处理你的请求"),
             "agent": ("GRAPH_NODE_UPDATED", "正在生成回复"),
             "tools": ("TOOLS_PREPARED", "已准备工具调用，正在查询所需数据"),
+            "memory_commit": ("GRAPH_NODE_UPDATED", "正在保存记忆"),
             "finalize": ("GRAPH_NODE_UPDATED", "正在整理最终结果"),
             "empty": ("GRAPH_NODE_UPDATED", "输入为空，正在返回默认结果"),
         }
@@ -170,12 +187,19 @@ class LangGraphStreamAdapter:
         self._factory = factory
         self._has_ai_text = False
         self._last_status: tuple[str, str] | None = None
+        self._interrupted = False  # 中断标志，用于抑制 result/completed
 
     def initial_events(self) -> list[StreamEvent]:
         return [self._factory.build_request_accepted()]
 
     def adapt(self, event_name: str, data: dict[str, object]) -> list[StreamEvent]:
         if event_name == "session":
+            return []
+        if event_name == "interrupts":
+            self._interrupted = True
+            return self._adapt_interrupt_event(data)
+        # 中断后抑制 result/completed 事件
+        if self._interrupted:
             return []
         if event_name == "updates":
             return self._adapt_update_event(data)
@@ -188,6 +212,11 @@ class LangGraphStreamAdapter:
         return []
 
     def _adapt_update_event(self, data: dict[str, object]) -> list[StreamEvent]:
+        # 检测 LangGraph v2 interrupt：updates chunk 中 data 键为 __interrupt__
+        payload = data.get("data")
+        if isinstance(payload, dict) and "__interrupt__" in payload:
+            return self._adapt_update_interrupt(payload["__interrupt__"])
+
         node_name = self._resolve_node_name(data)
         status = self._factory.status_for_node(node_name)
         if status == self._last_status:
@@ -195,6 +224,32 @@ class LangGraphStreamAdapter:
         self._last_status = status
         code, message = status
         return [self._factory.build_plan_status(code=code, message=message)]
+
+    def _adapt_update_interrupt(self, interrupt_tuple: object) -> list[StreamEvent]:
+        """处理 updates chunk 中的 __interrupt__ 数据，转为 INTERRUPT SSE 事件。
+
+        注意：数据经过 jsonable_encoder 序列化后，Interrupt 对象变为 dict，
+        需要兼容 dict 和原始 Interrupt 对象两种格式。
+        """
+        self._interrupted = True
+        if not isinstance(interrupt_tuple, (list, tuple)):
+            return []
+        first = interrupt_tuple[0] if interrupt_tuple else None
+        if first is None:
+            return []
+        # 兼容 dict（jsonable_encoder 序列化后）和 Interrupt 对象（原始格式）
+        if isinstance(first, dict):
+            value = first.get("value")
+        else:
+            value = getattr(first, "value", None)
+        if value is None:
+            return []
+        # value 可能是 dict/list（questions payload）或 str
+        if isinstance(value, (dict, list)):
+            questions_json = json.dumps(value, ensure_ascii=False)
+        else:
+            questions_json = str(value)
+        return [self._factory.build_interrupt(questions_json=questions_json)]
 
     def _adapt_message_event(self, data: dict[str, object]) -> list[StreamEvent]:
         message = data.get("message")
@@ -220,6 +275,17 @@ class LangGraphStreamAdapter:
             return []
         self._has_ai_text = True
         return [self._factory.build_ai_token(fallback_text)]
+
+    def _adapt_interrupt_event(self, data: dict[str, object]) -> list[StreamEvent]:
+        """处理 LangGraph interrupt 事件，转为 INTERRUPT SSE 事件。"""
+        interrupts = data.get("interrupts")
+        if not interrupts:
+            return []
+        # 取第一个 interrupt 的 value 作为问题 JSON
+        questions_json = str(interrupts[0].get("value", "")) if interrupts else ""
+        if not questions_json:
+            return []
+        return [self._factory.build_interrupt(questions_json=questions_json)]
 
     @staticmethod
     def _resolve_node_name(data: dict[str, object]) -> str:

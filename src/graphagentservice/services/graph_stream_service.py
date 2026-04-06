@@ -86,6 +86,49 @@ class GraphStreamDispatchService:
             trace_id=resolved_trace_id,
         )
 
+    async def resume(
+        self,
+        *,
+        graph_name: str,
+        resume_value: dict[str, Any],
+        session_id: str,
+        page_id: str | None = None,
+        request_id: str | None = None,
+        request_context: GraphRequestContext | None = None,
+    ) -> GraphStreamAccepted:
+        """恢复被中断的 graph（interrupt 后提交用户答案）。"""
+        resolved_user_id = self._resolve_user_id(request_context)
+        self._sse_connection_registry.require_connections(
+            session_id=session_id,
+            user_id=resolved_user_id,
+            page_id=page_id,
+        )
+
+        resolved_request_id = request_id or uuid4().hex
+        resolved_trace_id = self._resolve_trace_id(request_context)
+        task = asyncio.create_task(
+            self._run_resume_stream(
+                graph_name=graph_name,
+                resume_value=dict(resume_value),
+                session_id=session_id,
+                page_id=page_id,
+                user_id=resolved_user_id,
+                request_id=resolved_request_id,
+                trace_id=resolved_trace_id,
+                request_context=request_context,
+            )
+        )
+        self._tasks.add(task)
+        task.add_done_callback(self._tasks.discard)
+
+        return GraphStreamAccepted(
+            graph_name=graph_name,
+            session_id=session_id,
+            page_id=page_id,
+            request_id=resolved_request_id,
+            trace_id=resolved_trace_id,
+        )
+
     async def _run_stream(
         self,
         *,
@@ -119,6 +162,54 @@ class GraphStreamDispatchService:
                 graph_name=graph_name,
                 payload=payload,
                 session_id=session_id,
+                request_context=request_context,
+            ):
+                events = adapter.adapt(graph_event.event, graph_event.data)
+                await self._bus.publish_many(events)
+
+        except Exception as exc:
+            await self._bus.publish(
+                factory.build_error(
+                    code=_error_code(exc),
+                    message=_error_message(exc),
+                    retriable=_is_retriable(exc),
+                )
+            )
+
+    async def _run_resume_stream(
+        self,
+        *,
+        graph_name: str,
+        resume_value: dict[str, Any],
+        session_id: str,
+        page_id: str | None,
+        user_id: str | None,
+        request_id: str,
+        trace_id: str,
+        request_context: GraphRequestContext | None,
+    ) -> None:
+        """Resume 后台流：调用 GraphService.resume_stream_events。"""
+        target = StreamEventTarget(
+            graph_name=graph_name,
+            session_id=session_id,
+            request_id=request_id,
+            trace_id=trace_id,
+            user_id=user_id,
+            page_id=page_id,
+        )
+        sequence = StreamEventSequence()
+        factory = StreamEventFactory(target=target, sequence=sequence)
+        adapter = LangGraphStreamAdapter(factory=factory)
+        tool_emitter = ToolStreamEventEmitter(factory=factory, bus=self._bus)
+        request_context = _attach_tool_stream_emitter(request_context, tool_emitter)
+
+        try:
+            await self._bus.publish(factory.build_request_accepted())
+
+            async for graph_event in self._graph_service.resume_stream_events(
+                graph_name=graph_name,
+                session_id=session_id,
+                resume_value=resume_value,
                 request_context=request_context,
             ):
                 events = adapter.adapt(graph_event.event, graph_event.data)

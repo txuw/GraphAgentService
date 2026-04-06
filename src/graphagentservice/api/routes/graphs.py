@@ -25,6 +25,7 @@ from graphagentservice.schemas.api import (
     PlanAnalyzeInvokeResult,
     PlanAnalyzeSummaryInvokeResult,
     PlanAnalyzeSummaryRequest,
+    GraphResumeRequest,
     ResultResponse,
     TextAnalysisGraphRequest,
     TextAnalysisInvokeResult,
@@ -599,3 +600,108 @@ def _pop_optional_alias(payload: dict[str, Any], *aliases: str) -> str | None:
             if candidate:
                 return candidate
     return None
+
+
+# ── Resume 端点 ──────────────────────────────────────────────────────
+
+
+@router.post(
+    "/graphs/plan-analyze/resume",
+    response_model=ResultResponse[str],
+    operation_id="resumePlanAnalyzeGraph",
+)
+async def resume_plan_analyze_graph(
+    request: Request,
+    response: Response,
+    body: GraphResumeRequest,
+    session_id: str = Query(alias="sessionId"),
+    page_id: str | None = Query(default=None, alias="pageId"),
+    request_id: str | None = Query(default=None, alias="requestId"),
+    graph_stream_dispatch_service: GraphStreamDispatchService = Depends(
+        get_graph_stream_dispatch_service
+    ),
+) -> ResultResponse[str]:
+    """恢复被中断的 plan-analyze graph，提交用户答案后继续执行。"""
+    return await _dispatch_graph_resume(
+        request=request,
+        response=response,
+        graph_name=PLAN_ANALYZE_GRAPH,
+        resume_value=body.answers,
+        session_id=session_id,
+        page_id=page_id,
+        request_id=request_id,
+        graph_stream_dispatch_service=graph_stream_dispatch_service,
+    )
+
+
+@router.post(
+    "/graphs/{graph_name}/resume",
+    response_model=ResultResponse[str],
+    include_in_schema=False,
+)
+async def resume_graph(
+    request: Request,
+    response: Response,
+    graph_name: str,
+    body: GraphResumeRequest,
+    session_id: str = Query(alias="sessionId"),
+    page_id: str | None = Query(default=None, alias="pageId"),
+    request_id: str | None = Query(default=None, alias="requestId"),
+    graph_stream_dispatch_service: GraphStreamDispatchService = Depends(
+        get_graph_stream_dispatch_service
+    ),
+) -> ResultResponse[str]:
+    """通用 resume 端点，恢复任意被中断的 graph。"""
+    return await _dispatch_graph_resume(
+        request=request,
+        response=response,
+        graph_name=graph_name,
+        resume_value=body.answers,
+        session_id=session_id,
+        page_id=page_id,
+        request_id=request_id,
+        graph_stream_dispatch_service=graph_stream_dispatch_service,
+    )
+
+
+async def _dispatch_graph_resume(
+    *,
+    request: Request,
+    response: Response,
+    graph_name: str,
+    resume_value: dict[str, str],
+    session_id: str,
+    page_id: str | None,
+    request_id: str | None,
+    graph_stream_dispatch_service: GraphStreamDispatchService,
+) -> ResultResponse[str]:
+    """统一 resume 分发逻辑。"""
+    request_context = build_graph_request_context(request)
+    trace_headers = build_trace_response_headers(request_context.trace_id)
+
+    resolved_session_id = _require_non_empty_id(
+        session_id,
+        field_name="sessionId",
+        headers=trace_headers,
+    )
+    resolved_page_id = _resolve_optional_id(page_id)
+    resolved_request_id = _resolve_optional_id(request_id)
+
+    try:
+        accepted = await graph_stream_dispatch_service.resume(
+            graph_name=graph_name,
+            resume_value=resume_value,
+            session_id=resolved_session_id,
+            page_id=resolved_page_id,
+            request_id=resolved_request_id,
+            request_context=request_context,
+        )
+    except SseConnectionNotFoundError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=str(exc),
+            headers=trace_headers,
+        ) from exc
+
+    response.headers.update(trace_headers)
+    return ResultResponse(data=accepted.request_id)

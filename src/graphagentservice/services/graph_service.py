@@ -2,9 +2,12 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
+import time
 from contextlib import asynccontextmanager
 from collections.abc import AsyncIterator
 from dataclasses import dataclass
+from typing import Any
 from uuid import uuid4
 
 from fastapi.encoders import jsonable_encoder
@@ -17,6 +20,8 @@ from graphagentservice.graphs.registry import GraphRegistry
 from graphagentservice.graphs.runtime import GraphRunContext, GraphRuntime, ToolEventEmitterProtocol
 from graphagentservice.llm.router import LLMRouter
 from graphagentservice.mcp import MCPToolResolver
+
+_logger = logging.getLogger(__name__)
 
 
 @dataclass(slots=True)
@@ -111,11 +116,13 @@ class GraphService:
         llm_router: LLMRouter,
         mcp_tool_resolver: MCPToolResolver | None = None,
         checkpoint_namespace_prefix: str = "",
+        memory_provider: Any | None = None,
     ) -> None:
         self._registry = registry
         self._llm_router = llm_router
         self._mcp_tool_resolver = mcp_tool_resolver
         self._checkpoint_namespace_prefix = checkpoint_namespace_prefix.strip()
+        self._memory_provider = memory_provider
         self._session_execution_coordinator = _SessionExecutionCoordinator()
 
     def list_graphs(self) -> tuple[GraphRuntime, ...]:
@@ -185,6 +192,7 @@ class GraphService:
                 data={"graph_name": graph_name, "session_id": resolved_session_id},
             )
             final_state: dict[str, object] | None = None
+            has_interrupt = False
             async for chunk in runtime.graph.astream(
                 graph_input.model_dump(),
                 config=self._build_graph_config(
@@ -199,14 +207,90 @@ class GraphService:
                 if chunk_type == "values":
                     final_state = chunk["data"]
                     continue
+                # 检测 updates chunk 中的 __interrupt__（LangGraph v2 中断信号）
+                if chunk_type == "updates" and _chunk_has_interrupt(chunk):
+                    has_interrupt = True
                 yield GraphStreamEvent(
                     event=chunk_type,
                     data=self._serialize_stream_chunk(chunk),
                 )
 
-            output = runtime.output_model.model_validate(final_state or {})
-            yield GraphStreamEvent(event="result", data=output.model_dump())
-            yield GraphStreamEvent(event="completed", data={"session_id": resolved_session_id})
+            # interrupt 后不发出 result/completed，等待 resume 恢复
+            if not has_interrupt:
+                output = runtime.output_model.model_validate(final_state or {})
+                yield GraphStreamEvent(event="result", data=output.model_dump())
+                yield GraphStreamEvent(event="completed", data={"session_id": resolved_session_id})
+
+    async def resume_stream_events(
+        self,
+        graph_name: str,
+        *,
+        session_id: str,
+        resume_value: dict[str, object],
+        request_context: GraphRequestContext | None = None,
+    ) -> AsyncIterator[GraphStreamEvent]:
+        """Resume a paused graph (after interrupt) with user-provided answers."""
+        from langgraph.types import Command
+
+        runtime = self._registry.get(graph_name)
+        resolved_session_id = self._resolve_session_id(
+            session_id=session_id,
+            payload={},
+        )
+        _logger.info(
+            "Graph resume started  graph=%s  session=%s",
+            graph_name,
+            resolved_session_id,
+        )
+        t0 = time.perf_counter()
+        chunk_count = 0
+
+        async with self._session_execution_coordinator.hold(
+            graph_name=runtime.name,
+            session_id=resolved_session_id,
+        ):
+            yield GraphStreamEvent(
+                event="session",
+                data={"graph_name": graph_name, "session_id": resolved_session_id},
+            )
+
+            final_state: dict[str, object] | None = None
+            has_interrupt = False
+            async for chunk in runtime.graph.astream(
+                Command(resume=resume_value),
+                config=self._build_graph_config(
+                    runtime=runtime,
+                    session_id=resolved_session_id,
+                ),
+                context=self._build_context(runtime, request_context=request_context),
+                stream_mode=list(runtime.stream_modes),
+                version="v2",
+            ):
+                chunk_count += 1
+                chunk_type = str(chunk["type"])
+                if chunk_type == "values":
+                    final_state = chunk["data"]
+                    continue
+                if chunk_type == "updates" and _chunk_has_interrupt(chunk):
+                    has_interrupt = True
+                yield GraphStreamEvent(
+                    event=chunk_type,
+                    data=self._serialize_stream_chunk(chunk),
+                )
+
+            if not has_interrupt:
+                output = runtime.output_model.model_validate(final_state or {})
+                yield GraphStreamEvent(event="result", data=output.model_dump())
+                yield GraphStreamEvent(event="completed", data={"session_id": resolved_session_id})
+
+        elapsed_ms = (time.perf_counter() - t0) * 1000
+        _logger.info(
+            "Graph resume completed  graph=%s  session=%s  chunks=%d  elapsed=%.0fms",
+            graph_name,
+            resolved_session_id,
+            chunk_count,
+            elapsed_ms,
+        )
 
     async def get_latest_state(
         self,
@@ -293,6 +377,8 @@ class GraphService:
             tool_stream_emitter=request_context.tool_stream_emitter
             if request_context is not None
             else None,
+            memory_provider=self._memory_provider.memory if self._memory_provider else None,
+            memory_commit_worker=self._memory_provider.commit_worker if self._memory_provider else None,
         )
 
     def _build_graph_config(
@@ -365,3 +451,11 @@ class GraphService:
     @staticmethod
     def _to_sse(event: str, data: dict[str, object]) -> str:
         return f"event: {event}\ndata: {json.dumps(data, ensure_ascii=True)}\n\n"
+
+
+def _chunk_has_interrupt(chunk: dict[str, object]) -> bool:
+    """检测 LangGraph v2 updates chunk 是否包含 interrupt 信号。"""
+    data = chunk.get("data")
+    if not isinstance(data, dict):
+        return False
+    return "__interrupt__" in data

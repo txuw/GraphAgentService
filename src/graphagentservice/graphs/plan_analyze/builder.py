@@ -36,19 +36,23 @@ class PlanAnalyzeGraphBuilder:
             input_schema=PlanAnalyzeGraphInput,
             output_schema=PlanAnalyzeGraphOutput,
         )
+        graph.add_node("memory_recall", self._nodes.memory_recall)
         graph.add_node("analyze", self._nodes.analyze)
         graph.add_node("tools", self._nodes.tools)
+        graph.add_node("memory_commit", self._nodes.memory_commit)
 
-        graph.add_edge(START, "analyze")
+        graph.add_edge(START, "memory_recall")
+        graph.add_edge("memory_recall", "analyze")
         graph.add_conditional_edges(
             "analyze",
             self._nodes.route_after_analyze,
             {
                 "tools": "tools",
-                "__end__": END,
+                "__end__": "memory_commit",
             },
         )
         graph.add_edge("tools", "analyze")
+        graph.add_edge("memory_commit", END)
 
         compile_kwargs: dict[str, Any] = {}
         if self._checkpointer is not None:

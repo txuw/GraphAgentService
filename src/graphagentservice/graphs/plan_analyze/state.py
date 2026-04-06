@@ -16,6 +16,8 @@ class PlanAnalyzeGraphState(TypedDict, total=False):
     messages: Annotated[list[AnyMessage], add_messages]
     plan: str
     analysis: str
+    user_id: str               # Mem0 用户标识（从 AuthenticatedUser 解析）
+    related_memories: str      # recall 检索到的记忆上下文
 
 
 class PlanAnalyzeGraphOutput(TypedDict):

@@ -5,7 +5,12 @@ from typing import TYPE_CHECKING, Any
 
 from langchain_core.messages import ToolMessage
 from langchain_core.tools import BaseTool
+from langgraph.errors import GraphInterrupt
 from langgraph.prebuilt import ToolNode
+
+import logging
+
+_logger = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
     from .stream_event_bus import StreamEventSink
@@ -82,6 +87,11 @@ class ObservedToolNode(ToolNode):
 
         try:
             result = await super().ainvoke(input, config, **kwargs)
+        except GraphInterrupt:
+            # GraphInterrupt 是 interrupt() 触发的中断信号，不是工具异常
+            # 直接向上冒泡给 LangGraph 处理，不发 tool_error
+            _logger.info("Tool node interrupted (GraphInterrupt)")
+            raise
         except Exception as exc:
             for call in tool_calls:
                 await self._emitter.emit_error(str(call.get("name", "unknown")), str(exc))

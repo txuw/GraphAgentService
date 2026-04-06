@@ -42,6 +42,8 @@ class GraphRunContext:
     mcp_tool_resolver: MCPToolResolver | None = None
     mcp_servers: tuple[str, ...] = ()
     tool_stream_emitter: ToolEventEmitterProtocol | None = None
+    memory_provider: Any | None = None
+    memory_commit_worker: Any | None = None
 
     def resolve_model(
         self,

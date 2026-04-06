@@ -9,7 +9,7 @@ from .stream_events import StreamEvent, StreamEventKind
 
 _logger = logging.getLogger(__name__)
 
-_TERMINAL_KINDS = frozenset({StreamEventKind.AI_DONE, StreamEventKind.AI_ERROR})
+_TERMINAL_KINDS = frozenset({StreamEventKind.AI_DONE, StreamEventKind.AI_ERROR, StreamEventKind.INTERRUPT})
 
 
 class SseStreamEventSink:

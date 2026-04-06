@@ -263,6 +263,16 @@ class ImageCaloriesChatExecuteRequest(ChatExecuteRequestBase):
         return {"text": self.text, "image_url": self.image_url}
 
 
+class GraphResumeRequest(BaseModel):
+    """Resume 请求 — 中断后用户提交答案。"""
+    model_config = ConfigDict(populate_by_name=True)
+
+    answers: dict[str, str] = Field(
+        description="问题答案映射，key 为问题文本或 question_id，value 为用户选择",
+        validation_alias=AliasChoices("answers", "resumeValue"),
+    )
+
+
 GraphInvokeResult = ResultResponse[dict[str, Any]]
 TextAnalysisInvokeResult = ResultResponse[TextAnalysisOutput]
 PlanAnalyzeInvokeResult = ResultResponse[PlanAnalyzeOutput]
