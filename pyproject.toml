@@ -22,7 +22,8 @@ dependencies = [
     "tzdata>=2025.2",
     "uvicorn[standard]>=0.41.0",
     "mem0ai>=1.0.11",
-    "pymilvus>=2.6.11",
+    "pymilvus>=2.4.0,<2.5.0",
+    "setuptools<82",  # pymilvus 依赖 pkg_resources，82+ 已移除
 ]
 
 [project.scripts]

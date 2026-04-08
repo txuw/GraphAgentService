@@ -114,6 +114,9 @@ class MemoryProvider:
             VectorStoreConfig,
         )
 
+        # 禁用 mem0 遥测，避免 posthog 上报失败产生噪音日志
+        os.environ.setdefault("MEM0_TELEMETRY", "False")
+
         api_key = self._llm_api_key
         base_url = self._llm_base_url
 
