@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 from collections.abc import AsyncIterator, Awaitable, Callable
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
@@ -9,6 +10,8 @@ from itertools import count
 from uuid import uuid4
 
 from graphagentservice.schemas.api import AgentStreamEvent
+
+_logger = logging.getLogger(__name__)
 
 
 class SseConnectionNotFoundError(LookupError):
@@ -110,6 +113,16 @@ class SseConnectionRegistry:
         key = (normalized_user_id, session_id, page_id)
         existing = self._connections_by_key.get(key)
         if existing is not None:
+            _logger.info(
+                "Replacing SSE connection",
+                extra={
+                    "event": "sse_connection_replaced",
+                    "sessionId": session_id,
+                    "pageId": page_id,
+                    "userId": normalized_user_id,
+                    "status": "replaced",
+                },
+            )
             await self.unregister(existing)
 
         connection = SseConnection(
@@ -121,6 +134,16 @@ class SseConnectionRegistry:
         )
         self._connections_by_key[key] = connection
         self._connections_by_id[connection.connection_id] = connection
+        _logger.info(
+            "SSE connection registered",
+            extra={
+                "event": "sse_connection_registered",
+                "sessionId": session_id,
+                "pageId": page_id,
+                "userId": normalized_user_id,
+                "status": "connected",
+            },
+        )
         return connection
 
     def get_by_connection_id(self, connection_id: str) -> SseConnection | None:
@@ -159,6 +182,16 @@ class SseConnectionRegistry:
         )
         if matches:
             return matches
+        _logger.warning(
+            "SSE connection not found",
+            extra={
+                "event": "sse_connection_not_found",
+                "sessionId": session_id,
+                "pageId": page_id,
+                "userId": user_id,
+                "status": "missing",
+            },
+        )
         raise SseConnectionNotFoundError(
             _missing_message(
                 session_id=session_id,
@@ -173,6 +206,16 @@ class SseConnectionRegistry:
         if current is connection:
             self._connections_by_key.pop(key, None)
         self._connections_by_id.pop(connection.connection_id, None)
+        _logger.info(
+            "SSE connection closed",
+            extra={
+                "event": "sse_connection_closed",
+                "sessionId": connection.session_id,
+                "pageId": connection.page_id,
+                "userId": connection.user_id,
+                "status": "closed",
+            },
+        )
         await connection.close()
 
     async def close_all(self) -> None:
@@ -203,6 +246,16 @@ class SseConnectionRegistry:
             done=False,
         )
         await connection.push(self._build_message(event))
+        _logger.info(
+            "SSE connected event sent",
+            extra={
+                "event": "sse_connected_event_sent",
+                "sessionId": connection.session_id,
+                "pageId": connection.page_id,
+                "userId": connection.user_id,
+                "status": "sent",
+            },
+        )
 
     async def publish_agent_event(
         self,
@@ -223,6 +276,18 @@ class SseConnectionRegistry:
                 await connection.push(message)
             except SseConnectionNotFoundError:
                 await self.unregister(connection)
+        if event.done or event.code is not None:
+            _logger.info(
+                "SSE terminal event published",
+                extra={
+                    "event": "sse_terminal_event_published",
+                    "sessionId": session_id,
+                    "pageId": page_id,
+                    "userId": user_id,
+                    "status": "published",
+                    "eventType": event.event_type,
+                },
+            )
 
     async def event_stream(
         self,

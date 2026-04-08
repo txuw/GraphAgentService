@@ -45,9 +45,21 @@ class ChatModelFactory:
                 "The langchain-openai package is required. Run `uv sync` to install dependencies."
             ) from exc
 
+        import httpx
+
+        # 流式场景需要区分 connect 与 read timeout：
+        # connect 短一些快速失败，read timeout 要给 LLM 足够的生成时间
+        timeout_config = httpx.Timeout(
+            connect=10.0,
+            read=profile.timeout,
+            write=30.0,
+            pool=10.0,
+        )
+
         kwargs: dict[str, Any] = {
             "model": profile.model,
-            "timeout": profile.timeout,
+            "timeout": timeout_config,
+            "max_retries": 1,
         }
         api_key = _resolve_secret(profile.api_key)
         if api_key is not None:

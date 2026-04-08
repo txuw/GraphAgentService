@@ -30,7 +30,7 @@ class LLMProfile:
     base_url: str | None = None
     model: str = "gpt-4o-mini"
     temperature: float | None = 0.0
-    timeout: float = 60.0
+    timeout: float = 180.0
     max_tokens: int | None = None
     provider_options: dict[str, Any] = field(default_factory=dict)
 
@@ -44,7 +44,7 @@ class LLMProfile:
             base_url=settings.get("base_url"),
             model=str(settings.get("model", "gpt-4o-mini")),
             temperature=settings.get("temperature", 0.0),
-            timeout=float(settings.get("timeout", 60.0)),
+            timeout=float(settings.get("timeout", 180.0)),
             max_tokens=settings.get("max_tokens"),
             provider_options=dict(as_mapping(settings.get("provider_options"))),
         )

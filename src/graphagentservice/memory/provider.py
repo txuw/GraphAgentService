@@ -11,6 +11,8 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING, Any
 
+from graphagentservice.common.logging import context_extra
+
 if TYPE_CHECKING:
     from dynaconf.utils.boxing import DynaBox
 
@@ -20,8 +22,16 @@ _logger = logging.getLogger(__name__)
 class MemoryProvider:
     """全局记忆服务提供者（单例）。"""
 
-    def __init__(self, settings: DynaBox) -> None:
+    def __init__(
+        self,
+        settings: DynaBox,
+        *,
+        llm_api_key: str = "",
+        llm_base_url: str = "",
+    ) -> None:
         self._settings = settings
+        self._llm_api_key = llm_api_key
+        self._llm_base_url = llm_base_url
         self._memory: Any | None = None
         self._commit_worker: Any | None = None
 
@@ -33,11 +43,17 @@ class MemoryProvider:
         """应用启动时调用。"""
         enabled = self._settings.get("enabled", False)
         if not enabled:
-            _logger.info("Memory provider disabled")
+            _logger.info(
+                "Memory provider disabled",
+                extra=context_extra(event="memory_provider_disabled", status="disabled"),
+            )
             return
 
         self._memory = self._create_memory()
-        _logger.info("Memory provider initialized")
+        _logger.info(
+            "Memory provider initialized",
+            extra=context_extra(event="memory_provider_initialized", status="initialized"),
+        )
 
         from graphagentservice.memory.commit import MemoryCommitWorker
 
@@ -48,13 +64,19 @@ class MemoryProvider:
             worker_count=int(commit_cfg.get("worker_count", 2)),
         )
         await self._commit_worker.start()
-        _logger.info("Memory commit worker started")
+        _logger.info(
+            "Memory commit worker started",
+            extra=context_extra(event="memory_worker_started", status="started"),
+        )
 
     async def shutdown(self) -> None:
         """应用关闭时调用。"""
         if self._commit_worker is not None:
             await self._commit_worker.stop()
-            _logger.info("Memory commit worker stopped")
+            _logger.info(
+                "Memory commit worker stopped",
+                extra=context_extra(event="memory_worker_stopped", status="stopped"),
+            )
         self._memory = None
         self._commit_worker = None
 
@@ -92,14 +114,13 @@ class MemoryProvider:
             VectorStoreConfig,
         )
 
-        # 从 LLM 全局配置获取 API Key
-        api_key = os.environ.get("LLM__PROFILES__DEFAULT__API_KEY")
-        base_url = os.environ.get("LLM__PROFILES__DEFAULT__BASE_URL")
+        api_key = self._llm_api_key
+        base_url = self._llm_base_url
 
         if not api_key:
             raise ValueError(
-                "Memory enabled but no LLM__PROFILES__DEFAULT__API_KEY found. "
-                "Set it in .env or environment."
+                "Memory enabled but no LLM API key provided. "
+                "Pass llm_api_key when constructing MemoryProvider."
             )
 
         # 设置 Mem0 依赖的环境变量

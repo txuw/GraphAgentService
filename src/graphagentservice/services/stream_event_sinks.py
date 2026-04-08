@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 
+from graphagentservice.common.logging import context_extra
 from graphagentservice.schemas.api import AgentStreamEvent
 from graphagentservice.services.sse import SseConnectionNotFoundError, SseConnectionRegistry
 
@@ -35,7 +36,16 @@ class SseStreamEventSink:
                 event=wire,
             )
         except SseConnectionNotFoundError:
-            pass
+            _logger.warning(
+                "SSE connection missing during sink publish",
+                extra=context_extra(
+                    event="sse_sink_publish_skipped",
+                    status="skipped",
+                    sessionId=event.target.session_id,
+                    requestId=event.target.request_id,
+                    pageId=event.target.page_id,
+                ),
+            )
 
 
 def _project(event: StreamEvent) -> AgentStreamEvent:

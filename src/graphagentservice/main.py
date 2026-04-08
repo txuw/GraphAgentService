@@ -3,10 +3,12 @@ from fastapi import FastAPI
 from graphagentservice.api import router as api_router
 from graphagentservice.common.auth import LogtoAuthenticator
 from graphagentservice.common import create_checkpoint_provider, get_settings
+from graphagentservice.common.logging import configure_logging
 from graphagentservice.common.lifecycle import create_app_lifespan
 from graphagentservice.graphs import create_graph_registry
 from graphagentservice.llm import LLMRouter
 from graphagentservice.mcp import MCPSettings, MCPToolResolver
+from graphagentservice.memory import MemoryProvider
 from graphagentservice.services import (
     ChatStreamService,
     GraphService,
@@ -20,18 +22,26 @@ from graphagentservice.services import (
 
 def create_app() -> FastAPI:
     settings = get_settings()
+    configure_logging(settings)
     llm_router = LLMRouter(settings.llm)
     checkpoint_provider = create_checkpoint_provider(settings.graph)
     logto_authenticator = LogtoAuthenticator(settings.get("logto", {}))
     mcp_settings = MCPSettings.model_validate(settings.get("mcp", {}))
     mcp_tool_resolver = MCPToolResolver(mcp_settings)
     sse_connection_registry = SseConnectionRegistry()
+    memory_provider = MemoryProvider(
+        settings.get("memory", {}),
+        llm_api_key=str(settings.llm.profiles.default.get("api_key", "")),
+        llm_base_url=str(settings.llm.profiles.default.get("base_url", "")),
+    )
 
     stream_event_bus = InProcessStreamEventBus()
     sse_sink = SseStreamEventSink(registry=sse_connection_registry)
     stream_event_bus.subscribe(sse_sink)
 
     async def initialize_app_state(app: FastAPI) -> None:
+        await memory_provider.startup()
+
         graph_registry = create_graph_registry(
             settings=settings,
             checkpoint_provider=checkpoint_provider,
@@ -41,6 +51,7 @@ def create_app() -> FastAPI:
             llm_router,
             mcp_tool_resolver=mcp_tool_resolver,
             checkpoint_namespace_prefix=str(settings.app.name),
+            memory_provider=memory_provider,
         )
         app.state.graph_service = graph_service
         graph_stream_dispatch_service = GraphStreamDispatchService(
@@ -63,6 +74,7 @@ def create_app() -> FastAPI:
             app_initializer=initialize_app_state,
             checkpoint_provider=checkpoint_provider,
             sse_connection_registry=sse_connection_registry,
+            memory_provider=memory_provider,
         ),
     )
     app.state.sse_connection_registry = sse_connection_registry

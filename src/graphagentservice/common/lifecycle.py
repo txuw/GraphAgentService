@@ -19,6 +19,7 @@ def create_app_lifespan(
     app_initializer: Callable[[FastAPI], Awaitable[None] | None] | None = None,
     checkpoint_provider: CheckpointProvider,
     sse_connection_registry: SseConnectionRegistry,
+    memory_provider: Any | None = None,
 ) -> Callable[[FastAPI], Any]:
     @asynccontextmanager
     async def lifespan(app: FastAPI):
@@ -39,6 +40,8 @@ def create_app_lifespan(
             # 这里保留一次兜底清理，覆盖非信号触发的退出路径和测试场景。
             await sse_connection_registry.close_all()
             await checkpoint_provider.shutdown()
+            if memory_provider is not None:
+                await memory_provider.shutdown()
 
     return lifespan
 

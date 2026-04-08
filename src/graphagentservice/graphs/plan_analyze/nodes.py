@@ -12,6 +12,7 @@
 from __future__ import annotations
 
 import logging
+import time
 from collections.abc import Sequence
 from typing import Any
 
@@ -21,6 +22,7 @@ from langgraph.prebuilt import ToolNode, tools_condition
 from langgraph.runtime import Runtime
 
 from graphagentservice.graphs.runtime import GraphRunContext
+from graphagentservice.common.logging import context_extra
 
 from .prompts import ANALYSIS_PROMPT_TEMPLATE, SYSTEM_ANALYSIS_PROMPT
 from .state import PlanAnalyzeGraphState
@@ -46,17 +48,72 @@ class PlanAnalyzeNodes:
         runtime: Runtime[GraphRunContext],
     ) -> dict[str, str]:
         """从 Mem0 检索与 query 相关的记忆，注入到分析上下文。"""
+        started = time.perf_counter()
+        _logger.info(
+            "Memory recall node started",
+            extra=context_extra(
+                event="graph_node_started",
+                graph=runtime.context.graph_name,
+                sessionId=runtime.context.session_id,
+                requestId=runtime.context.request_id,
+                pageId=runtime.context.page_id,
+                node="memory_recall",
+                status="started",
+            ),
+        )
         memory = runtime.context.memory_provider
         user_id = self._resolve_user_id(runtime)
 
         if memory is None or not user_id:
-            return {"user_id": user_id, "related_memories": ""}
+            _logger.info(
+                "Memory recall skipped",
+                extra=context_extra(
+                    event="memory_recall_skipped",
+                    graph=runtime.context.graph_name,
+                    sessionId=runtime.context.session_id,
+                    requestId=runtime.context.request_id,
+                    pageId=runtime.context.page_id,
+                    userId=user_id or "-",
+                    node="memory_recall",
+                    status="skipped",
+                ),
+            )
+            result = {"user_id": user_id, "related_memories": ""}
+            _logger.info(
+                "Memory recall node completed",
+                extra=context_extra(
+                    event="graph_node_completed",
+                    graph=runtime.context.graph_name,
+                    sessionId=runtime.context.session_id,
+                    requestId=runtime.context.request_id,
+                    pageId=runtime.context.page_id,
+                    userId=user_id or "-",
+                    node="memory_recall",
+                    status="completed",
+                    elapsedMs=round((time.perf_counter() - started) * 1000),
+                ),
+            )
+            return result
 
         query = state.get("query", "")
         try:
             results = memory.search(query, user_id=user_id)
-        except Exception:
-            _logger.warning("Memory recall failed", exc_info=True)
+        except Exception as exc:
+            _logger.exception(
+                "Memory recall node failed",
+                extra=context_extra(
+                    event="graph_node_failed",
+                    graph=runtime.context.graph_name,
+                    sessionId=runtime.context.session_id,
+                    requestId=runtime.context.request_id,
+                    pageId=runtime.context.page_id,
+                    userId=user_id,
+                    node="memory_recall",
+                    status="failed",
+                    elapsedMs=round((time.perf_counter() - started) * 1000),
+                    errorType=type(exc).__name__,
+                ),
+            )
             return {"user_id": user_id, "related_memories": ""}
 
         filtered = [
@@ -64,12 +121,56 @@ class PlanAnalyzeNodes:
             if m.get("score", 0) > 0.3
         ]
         if filtered:
+            _logger.info(
+                "Memory recall completed",
+                extra=context_extra(
+                    event="memory_recall_completed",
+                    graph=runtime.context.graph_name,
+                    sessionId=runtime.context.session_id,
+                    requestId=runtime.context.request_id,
+                    pageId=runtime.context.page_id,
+                    userId=user_id,
+                    node="memory_recall",
+                    status="completed",
+                    hitCount=len(filtered),
+                ),
+            )
             texts = [f"- {m['memory']}" for m in filtered]
-            return {
+            result = {
                 "user_id": user_id,
                 "related_memories": "[用户相关记忆]\n" + "\n".join(texts),
             }
-        return {"user_id": user_id, "related_memories": ""}
+            _logger.info(
+                "Memory recall node completed",
+                extra=context_extra(
+                    event="graph_node_completed",
+                    graph=runtime.context.graph_name,
+                    sessionId=runtime.context.session_id,
+                    requestId=runtime.context.request_id,
+                    pageId=runtime.context.page_id,
+                    userId=user_id,
+                    node="memory_recall",
+                    status="completed",
+                    elapsedMs=round((time.perf_counter() - started) * 1000),
+                ),
+            )
+            return result
+        result = {"user_id": user_id, "related_memories": ""}
+        _logger.info(
+            "Memory recall node completed",
+            extra=context_extra(
+                event="graph_node_completed",
+                graph=runtime.context.graph_name,
+                sessionId=runtime.context.session_id,
+                requestId=runtime.context.request_id,
+                pageId=runtime.context.page_id,
+                userId=user_id,
+                node="memory_recall",
+                status="completed",
+                elapsedMs=round((time.perf_counter() - started) * 1000),
+            ),
+        )
+        return result
 
     # ------------------------------------------------------------------
     # 核心分析节点
@@ -80,14 +181,41 @@ class PlanAnalyzeNodes:
         state: PlanAnalyzeGraphState,
         runtime: Runtime[GraphRunContext],
     ) -> dict:
+        started = time.perf_counter()
+        _logger.info(
+            "Plan analyze node started",
+            extra=context_extra(
+                event="graph_node_started",
+                graph=runtime.context.graph_name,
+                sessionId=runtime.context.session_id,
+                requestId=runtime.context.request_id,
+                pageId=runtime.context.page_id,
+                node="analyze",
+                status="started",
+            ),
+        )
         query = state.get("query", "").strip()
         if not query:
-            return {
+            result = {
                 "query": "",
                 "plan": "",
                 "analysis": "No query provided.",
                 "messages": [],
             }
+            _logger.info(
+                "Plan analyze node completed",
+                extra=context_extra(
+                    event="graph_node_completed",
+                    graph=runtime.context.graph_name,
+                    sessionId=runtime.context.session_id,
+                    requestId=runtime.context.request_id,
+                    pageId=runtime.context.page_id,
+                    node="analyze",
+                    status="completed",
+                    elapsedMs=round((time.perf_counter() - started) * 1000),
+                ),
+            )
+            return result
 
         # 构建消息（含记忆上下文）
         messages = self.build_analysis_messages(
@@ -113,14 +241,44 @@ class PlanAnalyzeNodes:
                 tags=("analysis",),
             )
 
-        response = await model.ainvoke(messages)
-        result: dict = {
-            "query": query,
-            "plan": state.get("plan", ""),
-            "messages": [response],
-        }
-        if not response.tool_calls:
-            result["analysis"] = self._content_to_text(response)
+        try:
+            response = await model.ainvoke(messages)
+            result: dict = {
+                "query": query,
+                "plan": state.get("plan", ""),
+                "messages": [response],
+            }
+            if not response.tool_calls:
+                result["analysis"] = self._content_to_text(response)
+        except Exception as exc:
+            _logger.exception(
+                "Plan analyze node failed",
+                extra=context_extra(
+                    event="graph_node_failed",
+                    graph=runtime.context.graph_name,
+                    sessionId=runtime.context.session_id,
+                    requestId=runtime.context.request_id,
+                    pageId=runtime.context.page_id,
+                    node="analyze",
+                    status="failed",
+                    elapsedMs=round((time.perf_counter() - started) * 1000),
+                    errorType=type(exc).__name__,
+                ),
+            )
+            raise
+        _logger.info(
+            "Plan analyze node completed",
+            extra=context_extra(
+                event="graph_node_completed",
+                graph=runtime.context.graph_name,
+                sessionId=runtime.context.session_id,
+                requestId=runtime.context.request_id,
+                pageId=runtime.context.page_id,
+                node="analyze",
+                status="completed",
+                elapsedMs=round((time.perf_counter() - started) * 1000),
+            ),
+        )
         return result
 
     # ------------------------------------------------------------------
@@ -132,14 +290,55 @@ class PlanAnalyzeNodes:
         state: PlanAnalyzeGraphState,
         runtime: Runtime[GraphRunContext],
     ) -> dict[str, list[object]]:
-        resolved_tools = await self._resolve_tools(runtime)
-        # 注入提问工具到工具节点
-        resolved_tools.append(ask_user_questions)
-        tool_node = _build_tool_node(resolved_tools, runtime)
-        result = await tool_node.ainvoke(state, runtime=runtime)
-        if isinstance(result, dict):
-            return result
-        return {"messages": list(result)}
+        started = time.perf_counter()
+        _logger.info(
+            "Plan analyze tools node started",
+            extra=context_extra(
+                event="graph_node_started",
+                graph=runtime.context.graph_name,
+                sessionId=runtime.context.session_id,
+                requestId=runtime.context.request_id,
+                pageId=runtime.context.page_id,
+                node="tools",
+                status="started",
+            ),
+        )
+        try:
+            resolved_tools = await self._resolve_tools(runtime)
+            resolved_tools.append(ask_user_questions)
+            tool_node = _build_tool_node(resolved_tools, runtime)
+            result = await tool_node.ainvoke(state, runtime=runtime)
+            payload = result if isinstance(result, dict) else {"messages": list(result)}
+        except Exception as exc:
+            _logger.exception(
+                "Plan analyze tools node failed",
+                extra=context_extra(
+                    event="graph_node_failed",
+                    graph=runtime.context.graph_name,
+                    sessionId=runtime.context.session_id,
+                    requestId=runtime.context.request_id,
+                    pageId=runtime.context.page_id,
+                    node="tools",
+                    status="failed",
+                    elapsedMs=round((time.perf_counter() - started) * 1000),
+                    errorType=type(exc).__name__,
+                ),
+            )
+            raise
+        _logger.info(
+            "Plan analyze tools node completed",
+            extra=context_extra(
+                event="graph_node_completed",
+                graph=runtime.context.graph_name,
+                sessionId=runtime.context.session_id,
+                requestId=runtime.context.request_id,
+                pageId=runtime.context.page_id,
+                node="tools",
+                status="completed",
+                elapsedMs=round((time.perf_counter() - started) * 1000),
+            ),
+        )
+        return payload
 
     # ------------------------------------------------------------------
     # 写链：记忆提交（异步入队，不阻塞主流程）
@@ -151,22 +350,117 @@ class PlanAnalyzeNodes:
         runtime: Runtime[GraphRunContext],
     ) -> dict:
         """将本轮关键信息异步入队写入 Mem0。"""
+        started = time.perf_counter()
+        _logger.info(
+            "Memory commit node started",
+            extra=context_extra(
+                event="graph_node_started",
+                graph=runtime.context.graph_name,
+                sessionId=runtime.context.session_id,
+                requestId=runtime.context.request_id,
+                pageId=runtime.context.page_id,
+                node="memory_commit",
+                status="started",
+            ),
+        )
         commit_worker = runtime.context.memory_commit_worker
         if commit_worker is None:
-            return {}
+            _logger.info(
+                "Memory commit skipped",
+                extra=context_extra(
+                    event="memory_commit_skipped",
+                    graph=runtime.context.graph_name,
+                    sessionId=runtime.context.session_id,
+                    requestId=runtime.context.request_id,
+                    pageId=runtime.context.page_id,
+                    node="memory_commit",
+                    status="skipped",
+                ),
+            )
+            result: dict = {}
+            _logger.info(
+                "Memory commit node completed",
+                extra=context_extra(
+                    event="graph_node_completed",
+                    graph=runtime.context.graph_name,
+                    sessionId=runtime.context.session_id,
+                    requestId=runtime.context.request_id,
+                    pageId=runtime.context.page_id,
+                    node="memory_commit",
+                    status="completed",
+                    elapsedMs=round((time.perf_counter() - started) * 1000),
+                ),
+            )
+            return result
 
         user_id = state.get("user_id", "")
         if not user_id:
-            return {}
+            result = {}
+            _logger.info(
+                "Memory commit node completed",
+                extra=context_extra(
+                    event="graph_node_completed",
+                    graph=runtime.context.graph_name,
+                    sessionId=runtime.context.session_id,
+                    requestId=runtime.context.request_id,
+                    pageId=runtime.context.page_id,
+                    node="memory_commit",
+                    status="completed",
+                    elapsedMs=round((time.perf_counter() - started) * 1000),
+                ),
+            )
+            return result
 
         messages = state.get("messages", [])
         commit_messages = self._extract_commit_messages(messages)
         if not commit_messages:
-            return {}
+            result = {}
+            _logger.info(
+                "Memory commit node completed",
+                extra=context_extra(
+                    event="graph_node_completed",
+                    graph=runtime.context.graph_name,
+                    sessionId=runtime.context.session_id,
+                    requestId=runtime.context.request_id,
+                    pageId=runtime.context.page_id,
+                    node="memory_commit",
+                    status="completed",
+                    elapsedMs=round((time.perf_counter() - started) * 1000),
+                ),
+            )
+            return result
 
         key = f"{runtime.context.trace_id}:{len(messages)}"
         await commit_worker.enqueue(user_id, commit_messages, key)
-        return {}
+        _logger.info(
+            "Memory commit requested",
+            extra=context_extra(
+                event="memory_commit_requested",
+                graph=runtime.context.graph_name,
+                sessionId=runtime.context.session_id,
+                requestId=runtime.context.request_id,
+                pageId=runtime.context.page_id,
+                userId=user_id,
+                node="memory_commit",
+                status="queued",
+                messageCount=len(commit_messages),
+            ),
+        )
+        result = {}
+        _logger.info(
+            "Memory commit node completed",
+            extra=context_extra(
+                event="graph_node_completed",
+                graph=runtime.context.graph_name,
+                sessionId=runtime.context.session_id,
+                requestId=runtime.context.request_id,
+                pageId=runtime.context.page_id,
+                node="memory_commit",
+                status="completed",
+                elapsedMs=round((time.perf_counter() - started) * 1000),
+            ),
+        )
+        return result
 
     # ------------------------------------------------------------------
     # 路由

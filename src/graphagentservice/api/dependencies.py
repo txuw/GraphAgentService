@@ -61,4 +61,7 @@ def build_graph_request_context(request: Request) -> GraphRequestContext:
         current_user=get_current_user(request),
         trace_id=trace_context.trace_id,
         request_headers=trace_context.request_headers,
+        session_id="",
+        request_id="",
+        page_id="",
     )

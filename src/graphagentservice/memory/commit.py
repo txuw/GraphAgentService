@@ -12,6 +12,8 @@ import asyncio
 import logging
 from typing import Any
 
+from graphagentservice.common.logging import context_extra
+
 _logger = logging.getLogger(__name__)
 
 
@@ -57,6 +59,12 @@ class MemoryCommitWorker:
             "MemoryCommitWorker started  workers=%d  queue_maxsize=%d",
             self._worker_count,
             self._queue.maxsize,
+            extra=context_extra(
+                event="memory_worker_started",
+                status="started",
+                workerCount=self._worker_count,
+                queueMaxsize=self._queue.maxsize,
+            ),
         )
 
     async def stop(self) -> None:
@@ -68,7 +76,10 @@ class MemoryCommitWorker:
         for task in self._workers:
             task.cancel()
         self._workers.clear()
-        _logger.info("MemoryCommitWorker stopped")
+        _logger.info(
+            "MemoryCommitWorker stopped",
+            extra=context_extra(event="memory_worker_stopped", status="stopped"),
+        )
 
     # ------------------------------------------------------------------
     # 公共接口
@@ -88,7 +99,14 @@ class MemoryCommitWorker:
             idempotency_key: 幂等键（如 ``session_id:request_id``）
         """
         if idempotency_key in self._seen_keys:
-            _logger.debug("Duplicate commit skipped  key=%s", idempotency_key)
+            _logger.info(
+                "Duplicate memory commit skipped",
+                extra=context_extra(
+                    event="memory_commit_duplicate_skipped",
+                    status="skipped",
+                    userId=user_id,
+                ),
+            )
             return
         self._seen_keys.add(idempotency_key)
         try:
@@ -96,9 +114,24 @@ class MemoryCommitWorker:
                 "user_id": user_id,
                 "messages": messages,
             })
-            _logger.debug("Commit enqueued  key=%s", idempotency_key)
+            _logger.info(
+                "Memory commit enqueued",
+                extra=context_extra(
+                    event="memory_commit_enqueued",
+                    status="queued",
+                    userId=user_id,
+                    messageCount=len(messages),
+                ),
+            )
         except asyncio.QueueFull:
-            _logger.warning("Commit queue full, dropping  key=%s", idempotency_key)
+            _logger.warning(
+                "Memory commit queue full",
+                extra=context_extra(
+                    event="memory_commit_queue_full",
+                    status="dropped",
+                    userId=user_id,
+                ),
+            )
 
     # ------------------------------------------------------------------
     # 内部
@@ -126,9 +159,20 @@ class MemoryCommitWorker:
                     "Memory committed  user=%s  msgs=%d",
                     item["user_id"],
                     len(item["messages"]),
+                    extra=context_extra(
+                        event="memory_commit_completed",
+                        status="completed",
+                        userId=item["user_id"],
+                        messageCount=len(item["messages"]),
+                    ),
                 )
             except Exception:
                 _logger.exception(
                     "Memory commit failed  user=%s",
                     item.get("user_id", "?"),
+                    extra=context_extra(
+                        event="memory_commit_failed",
+                        status="failed",
+                        userId=item.get("user_id", "?"),
+                    ),
                 )

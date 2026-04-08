@@ -16,6 +16,17 @@ from .config import (
     Settings,
     get_settings,
 )
+from .logging import (
+    bind_log_context,
+    build_log_config,
+    configure_logging,
+    context_extra,
+    current_log_context,
+    log_context,
+    log_timing,
+    mask_value,
+    summarize_mapping_keys,
+)
 
 __all__ = [
     "AppSettings",
@@ -30,6 +41,15 @@ __all__ = [
     "ObservabilitySettings",
     "PostgresCheckpointProvider",
     "Settings",
+    "bind_log_context",
+    "build_log_config",
+    "configure_logging",
+    "context_extra",
     "create_checkpoint_provider",
+    "current_log_context",
     "get_settings",
+    "log_context",
+    "log_timing",
+    "mask_value",
+    "summarize_mapping_keys",
 ]

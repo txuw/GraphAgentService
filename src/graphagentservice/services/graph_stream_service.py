@@ -1,11 +1,14 @@
 from __future__ import annotations
 
 import asyncio
+import logging
+import time
 from dataclasses import dataclass, replace
 from typing import Any
 from uuid import uuid4
 
 from graphagentservice.common.auth import AuthenticatedUser
+from graphagentservice.common.logging import bind_log_context, context_extra, reset_log_context
 from graphagentservice.common.trace import resolve_request_trace_context
 from graphagentservice.graphs.registry import GraphNotFoundError
 from graphagentservice.llm import ChatModelBuildError
@@ -20,6 +23,8 @@ from .stream_event_bus import InProcessStreamEventBus
 from .stream_events import LangGraphStreamAdapter, StreamEventFactory, StreamEventSequence, StreamEventTarget
 from .tool_execution import ToolStreamEventEmitter
 from .sse import SseConnectionRegistry
+
+_logger = logging.getLogger(__name__)
 
 
 @dataclass(slots=True)
@@ -54,7 +59,6 @@ class GraphStreamDispatchService:
         request_context: GraphRequestContext | None = None,
     ) -> GraphStreamAccepted:
         resolved_user_id = self._resolve_user_id(request_context)
-        # Pre-flight: ensure at least one SSE connection is ready to receive events.
         self._sse_connection_registry.require_connections(
             session_id=session_id,
             user_id=resolved_user_id,
@@ -62,7 +66,25 @@ class GraphStreamDispatchService:
         )
 
         resolved_request_id = request_id or uuid4().hex
-        resolved_trace_id = self._resolve_trace_id(request_context)
+        resolved_request_context = self._normalize_request_context(
+            request_context=request_context,
+            session_id=session_id,
+            request_id=resolved_request_id,
+            page_id=page_id,
+        )
+        resolved_trace_id = self._resolve_trace_id(resolved_request_context)
+        _logger.info(
+            "Graph stream accepted",
+            extra=context_extra(
+                event="graph_stream_accepted",
+                graph=graph_name,
+                sessionId=session_id,
+                requestId=resolved_request_id,
+                pageId=page_id,
+                userId=resolved_user_id,
+                status="accepted",
+            ),
+        )
         task = asyncio.create_task(
             self._run_stream(
                 graph_name=graph_name,
@@ -72,7 +94,7 @@ class GraphStreamDispatchService:
                 user_id=resolved_user_id,
                 request_id=resolved_request_id,
                 trace_id=resolved_trace_id,
-                request_context=request_context,
+                request_context=resolved_request_context,
             )
         )
         self._tasks.add(task)
@@ -105,7 +127,25 @@ class GraphStreamDispatchService:
         )
 
         resolved_request_id = request_id or uuid4().hex
-        resolved_trace_id = self._resolve_trace_id(request_context)
+        resolved_request_context = self._normalize_request_context(
+            request_context=request_context,
+            session_id=session_id,
+            request_id=resolved_request_id,
+            page_id=page_id,
+        )
+        resolved_trace_id = self._resolve_trace_id(resolved_request_context)
+        _logger.info(
+            "Graph resume accepted",
+            extra=context_extra(
+                event="graph_resume_accepted",
+                graph=graph_name,
+                sessionId=session_id,
+                requestId=resolved_request_id,
+                pageId=page_id,
+                userId=resolved_user_id,
+                status="accepted",
+            ),
+        )
         task = asyncio.create_task(
             self._run_resume_stream(
                 graph_name=graph_name,
@@ -115,7 +155,7 @@ class GraphStreamDispatchService:
                 user_id=resolved_user_id,
                 request_id=resolved_request_id,
                 trace_id=resolved_trace_id,
-                request_context=request_context,
+                request_context=resolved_request_context,
             )
         )
         self._tasks.add(task)
@@ -154,8 +194,21 @@ class GraphStreamDispatchService:
         adapter = LangGraphStreamAdapter(factory=factory)
         tool_emitter = ToolStreamEventEmitter(factory=factory, bus=self._bus)
         request_context = _attach_tool_stream_emitter(request_context, tool_emitter)
+        token = bind_log_context(
+            traceId=trace_id or "-",
+            graph=graph_name,
+            sessionId=session_id,
+            requestId=request_id,
+            pageId=page_id or "-",
+            userId=user_id or "-",
+        )
+        started = time.perf_counter()
 
         try:
+            _logger.info(
+                "Graph stream task started",
+                extra=context_extra(event="graph_stream_task_started", status="started"),
+            )
             await self._bus.publish(factory.build_request_accepted())
 
             async for graph_event in self._graph_service.stream_events(
@@ -168,6 +221,16 @@ class GraphStreamDispatchService:
                 await self._bus.publish_many(events)
 
         except Exception as exc:
+            elapsed_ms = round((time.perf_counter() - started) * 1000)
+            _logger.exception(
+                "Graph stream task failed",
+                extra=context_extra(
+                    event="graph_stream_task_failed",
+                    status="failed",
+                    elapsedMs=elapsed_ms,
+                    errorType=type(exc).__name__,
+                ),
+            )
             await self._bus.publish(
                 factory.build_error(
                     code=_error_code(exc),
@@ -175,6 +238,18 @@ class GraphStreamDispatchService:
                     retriable=_is_retriable(exc),
                 )
             )
+        else:
+            elapsed_ms = round((time.perf_counter() - started) * 1000)
+            _logger.info(
+                "Graph stream task completed",
+                extra=context_extra(
+                    event="graph_stream_task_completed",
+                    status="completed",
+                    elapsedMs=elapsed_ms,
+                ),
+            )
+        finally:
+            reset_log_context(token)
 
     async def _run_resume_stream(
         self,
@@ -202,8 +277,21 @@ class GraphStreamDispatchService:
         adapter = LangGraphStreamAdapter(factory=factory)
         tool_emitter = ToolStreamEventEmitter(factory=factory, bus=self._bus)
         request_context = _attach_tool_stream_emitter(request_context, tool_emitter)
+        token = bind_log_context(
+            traceId=trace_id or "-",
+            graph=graph_name,
+            sessionId=session_id,
+            requestId=request_id,
+            pageId=page_id or "-",
+            userId=user_id or "-",
+        )
+        started = time.perf_counter()
 
         try:
+            _logger.info(
+                "Graph resume task started",
+                extra=context_extra(event="graph_resume_task_started", status="started"),
+            )
             await self._bus.publish(factory.build_request_accepted())
 
             async for graph_event in self._graph_service.resume_stream_events(
@@ -216,6 +304,16 @@ class GraphStreamDispatchService:
                 await self._bus.publish_many(events)
 
         except Exception as exc:
+            elapsed_ms = round((time.perf_counter() - started) * 1000)
+            _logger.exception(
+                "Graph resume task failed",
+                extra=context_extra(
+                    event="graph_resume_task_failed",
+                    status="failed",
+                    elapsedMs=elapsed_ms,
+                    errorType=type(exc).__name__,
+                ),
+            )
             await self._bus.publish(
                 factory.build_error(
                     code=_error_code(exc),
@@ -223,6 +321,18 @@ class GraphStreamDispatchService:
                     retriable=_is_retriable(exc),
                 )
             )
+        else:
+            elapsed_ms = round((time.perf_counter() - started) * 1000)
+            _logger.info(
+                "Graph resume task completed",
+                extra=context_extra(
+                    event="graph_resume_task_completed",
+                    status="completed",
+                    elapsedMs=elapsed_ms,
+                ),
+            )
+        finally:
+            reset_log_context(token)
 
     @staticmethod
     def _resolve_trace_id(request_context: GraphRequestContext | None) -> str:
@@ -243,6 +353,23 @@ class GraphStreamDispatchService:
         candidate = user_id.strip()
         return candidate or None
 
+    @staticmethod
+    def _normalize_request_context(
+        *,
+        request_context: GraphRequestContext | None,
+        session_id: str,
+        request_id: str,
+        page_id: str | None,
+    ) -> GraphRequestContext | None:
+        if request_context is None:
+            return None
+        return replace(
+            request_context,
+            session_id=session_id,
+            request_id=request_id,
+            page_id=page_id or "",
+        )
+
 
 def _attach_tool_stream_emitter(
     request_context: GraphRequestContext | None,
@@ -253,6 +380,9 @@ def _attach_tool_stream_emitter(
             current_user=AuthenticatedUser.anonymous(),
             trace_id=emitter.factory.target.trace_id,
             request_headers={},
+            session_id=emitter.factory.target.session_id,
+            request_id=emitter.factory.target.request_id,
+            page_id=emitter.factory.target.page_id or "",
             tool_stream_emitter=emitter,
         )
     return replace(request_context, tool_stream_emitter=emitter)

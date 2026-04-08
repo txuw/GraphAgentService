@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from collections.abc import Mapping, Sequence
+from collections.abc import Sequence
 from dataclasses import dataclass, field
 from functools import partial
 from typing import TYPE_CHECKING, Any
@@ -35,6 +35,9 @@ class ToolEventEmitterProtocol:
 class GraphRunContext:
     llm_router: LLMRouter
     graph_name: str
+    session_id: str = ""
+    request_id: str = ""
+    page_id: str = ""
     llm_bindings: Mapping[str, str] = field(default_factory=dict)
     current_user: AuthenticatedUser = field(default_factory=AuthenticatedUser.anonymous)
     trace_id: str = ""

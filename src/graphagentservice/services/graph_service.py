@@ -15,6 +15,7 @@ from langchain_core.messages import message_to_dict
 from pydantic import BaseModel, ValidationError
 
 from graphagentservice.common.auth import AuthenticatedUser
+from graphagentservice.common.logging import context_extra, summarize_mapping_keys
 from graphagentservice.common.trace import TRACE_ID_HEADER, resolve_request_trace_context
 from graphagentservice.graphs.registry import GraphRegistry
 from graphagentservice.graphs.runtime import GraphRunContext, GraphRuntime, ToolEventEmitterProtocol
@@ -42,6 +43,9 @@ class GraphRequestContext:
     current_user: AuthenticatedUser
     trace_id: str
     request_headers: dict[str, str]
+    session_id: str = ""
+    request_id: str = ""
+    page_id: str = ""
     tool_stream_emitter: ToolEventEmitterProtocol | None = None
 
 
@@ -139,18 +143,65 @@ class GraphService:
         payload_dict = self._payload_to_dict(payload)
         graph_input = self._validate_payload(runtime, payload_dict)
         resolved_session_id = self._resolve_session_id(session_id=session_id, payload=payload_dict)
+        resolved_request_context = self._resolve_request_context(
+            request_context=request_context,
+            session_id=resolved_session_id,
+        )
+        started = time.perf_counter()
+        _logger.info(
+            "Graph invoke started",
+            extra=context_extra(
+                event="graph_invoke_started",
+                graph=runtime.name,
+                sessionId=resolved_session_id,
+                requestId=resolved_request_context.request_id,
+                pageId=resolved_request_context.page_id,
+                status="started",
+                payloadKeys=summarize_mapping_keys(payload_dict),
+            ),
+        )
         async with self._session_execution_coordinator.hold(
             graph_name=runtime.name,
             session_id=resolved_session_id,
         ):
-            state = await runtime.graph.ainvoke(
-                graph_input.model_dump(),
-                config=self._build_graph_config(
-                    runtime=runtime,
-                    session_id=resolved_session_id,
-                ),
-                context=self._build_context(runtime, request_context=request_context),
-            )
+            try:
+                state = await runtime.graph.ainvoke(
+                    graph_input.model_dump(),
+                    config=self._build_graph_config(
+                        runtime=runtime,
+                        session_id=resolved_session_id,
+                    ),
+                    context=self._build_context(runtime, request_context=resolved_request_context),
+                )
+            except Exception:
+                elapsed_ms = round((time.perf_counter() - started) * 1000)
+                _logger.exception(
+                    "Graph invoke failed",
+                    extra=context_extra(
+                        event="graph_invoke_failed",
+                        graph=runtime.name,
+                        sessionId=resolved_session_id,
+                        requestId=resolved_request_context.request_id,
+                        pageId=resolved_request_context.page_id,
+                        status="failed",
+                        elapsedMs=elapsed_ms,
+                        errorType="exception",
+                    ),
+                )
+                raise
+        elapsed_ms = round((time.perf_counter() - started) * 1000)
+        _logger.info(
+            "Graph invoke completed",
+            extra=context_extra(
+                event="graph_invoke_completed",
+                graph=runtime.name,
+                sessionId=resolved_session_id,
+                requestId=resolved_request_context.request_id,
+                pageId=resolved_request_context.page_id,
+                status="completed",
+                elapsedMs=elapsed_ms,
+            ),
+        )
         return GraphInvocationResult(
             graph_name=graph_name,
             session_id=resolved_session_id,
@@ -183,43 +234,93 @@ class GraphService:
         payload_dict = self._payload_to_dict(payload)
         graph_input = self._validate_payload(runtime, payload_dict)
         resolved_session_id = self._resolve_session_id(session_id=session_id, payload=payload_dict)
+        resolved_request_context = self._resolve_request_context(
+            request_context=request_context,
+            session_id=resolved_session_id,
+        )
+        started = time.perf_counter()
+        chunk_count = 0
+        has_interrupt = False
+        _logger.info(
+            "Graph stream started",
+            extra=context_extra(
+                event="graph_stream_started",
+                graph=runtime.name,
+                sessionId=resolved_session_id,
+                requestId=resolved_request_context.request_id,
+                pageId=resolved_request_context.page_id,
+                status="started",
+                payloadKeys=summarize_mapping_keys(payload_dict),
+            ),
+        )
         async with self._session_execution_coordinator.hold(
             graph_name=runtime.name,
             session_id=resolved_session_id,
         ):
-            yield GraphStreamEvent(
-                event="session",
-                data={"graph_name": graph_name, "session_id": resolved_session_id},
-            )
-            final_state: dict[str, object] | None = None
-            has_interrupt = False
-            async for chunk in runtime.graph.astream(
-                graph_input.model_dump(),
-                config=self._build_graph_config(
-                    runtime=runtime,
-                    session_id=resolved_session_id,
-                ),
-                context=self._build_context(runtime, request_context=request_context),
-                stream_mode=list(runtime.stream_modes),
-                version="v2",
-            ):
-                chunk_type = str(chunk["type"])
-                if chunk_type == "values":
-                    final_state = chunk["data"]
-                    continue
-                # 检测 updates chunk 中的 __interrupt__（LangGraph v2 中断信号）
-                if chunk_type == "updates" and _chunk_has_interrupt(chunk):
-                    has_interrupt = True
+            try:
                 yield GraphStreamEvent(
-                    event=chunk_type,
-                    data=self._serialize_stream_chunk(chunk),
+                    event="session",
+                    data={"graph_name": graph_name, "session_id": resolved_session_id},
                 )
+                final_state: dict[str, object] | None = None
+                async for chunk in runtime.graph.astream(
+                    graph_input.model_dump(),
+                    config=self._build_graph_config(
+                        runtime=runtime,
+                        session_id=resolved_session_id,
+                    ),
+                    context=self._build_context(runtime, request_context=resolved_request_context),
+                    stream_mode=list(runtime.stream_modes),
+                    version="v2",
+                ):
+                    chunk_count += 1
+                    chunk_type = str(chunk["type"])
+                    if chunk_type == "values":
+                        final_state = chunk["data"]
+                        continue
+                    if chunk_type == "updates" and _chunk_has_interrupt(chunk):
+                        has_interrupt = True
+                    yield GraphStreamEvent(
+                        event=chunk_type,
+                        data=self._serialize_stream_chunk(chunk),
+                    )
 
-            # interrupt 后不发出 result/completed，等待 resume 恢复
-            if not has_interrupt:
-                output = runtime.output_model.model_validate(final_state or {})
-                yield GraphStreamEvent(event="result", data=output.model_dump())
-                yield GraphStreamEvent(event="completed", data={"session_id": resolved_session_id})
+                if not has_interrupt:
+                    output = runtime.output_model.model_validate(final_state or {})
+                    yield GraphStreamEvent(event="result", data=output.model_dump())
+                    yield GraphStreamEvent(event="completed", data={"session_id": resolved_session_id})
+            except Exception:
+                elapsed_ms = round((time.perf_counter() - started) * 1000)
+                _logger.exception(
+                    "Graph stream failed",
+                    extra=context_extra(
+                        event="graph_stream_failed",
+                        graph=runtime.name,
+                        sessionId=resolved_session_id,
+                        requestId=resolved_request_context.request_id,
+                        pageId=resolved_request_context.page_id,
+                        status="failed",
+                        elapsedMs=elapsed_ms,
+                        chunkCount=chunk_count,
+                        errorType="exception",
+                    ),
+                )
+                raise
+        elapsed_ms = round((time.perf_counter() - started) * 1000)
+        _logger.info(
+            "Graph stream completed",
+            extra=context_extra(
+                event="graph_stream_completed",
+                graph=runtime.name,
+                sessionId=resolved_session_id,
+                requestId=resolved_request_context.request_id,
+                pageId=resolved_request_context.page_id,
+                status="completed",
+                elapsedMs=elapsed_ms,
+                chunkCount=chunk_count,
+                interrupted=has_interrupt,
+            ),
+        )
 
     async def resume_stream_events(
         self,
@@ -354,6 +455,9 @@ class GraphService:
                 current_user=AuthenticatedUser.anonymous(),
                 trace_id=trace_context.trace_id,
                 request_headers=trace_context.request_headers,
+                session_id="",
+                request_id="",
+                page_id="",
             )
         else:
             request_headers = dict(request_context.request_headers)
@@ -364,21 +468,52 @@ class GraphService:
                 current_user=request_context.current_user,
                 trace_id=trace_context.trace_id,
                 request_headers=trace_context.request_headers,
+                session_id=request_context.session_id,
+                request_id=request_context.request_id,
+                page_id=request_context.page_id,
+                tool_stream_emitter=request_context.tool_stream_emitter,
             )
         return GraphRunContext(
             llm_router=self._llm_router,
             graph_name=runtime.name,
+            session_id=resolved_request_context.session_id,
+            request_id=resolved_request_context.request_id,
+            page_id=resolved_request_context.page_id,
             llm_bindings=runtime.llm_bindings,
             current_user=resolved_request_context.current_user,
             trace_id=resolved_request_context.trace_id,
             request_headers=resolved_request_context.request_headers,
             mcp_tool_resolver=self._mcp_tool_resolver,
             mcp_servers=runtime.mcp_servers,
-            tool_stream_emitter=request_context.tool_stream_emitter
-            if request_context is not None
-            else None,
+            tool_stream_emitter=resolved_request_context.tool_stream_emitter,
             memory_provider=self._memory_provider.memory if self._memory_provider else None,
             memory_commit_worker=self._memory_provider.commit_worker if self._memory_provider else None,
+        )
+
+    @staticmethod
+    def _resolve_request_context(
+        *,
+        request_context: GraphRequestContext | None,
+        session_id: str,
+    ) -> GraphRequestContext:
+        if request_context is None:
+            trace_context = resolve_request_trace_context({})
+            return GraphRequestContext(
+                current_user=AuthenticatedUser.anonymous(),
+                trace_id=trace_context.trace_id,
+                request_headers=trace_context.request_headers,
+                session_id=session_id,
+                request_id="",
+                page_id="",
+            )
+        return GraphRequestContext(
+            current_user=request_context.current_user,
+            trace_id=request_context.trace_id,
+            request_headers=dict(request_context.request_headers),
+            session_id=session_id,
+            request_id=request_context.request_id,
+            page_id=request_context.page_id,
+            tool_stream_emitter=request_context.tool_stream_emitter,
         )
 
     def _build_graph_config(

@@ -10,6 +10,7 @@ from graphagentservice.api.dependencies import (
     get_graph_stream_dispatch_service,
     get_plan_analyze_summary_service,
 )
+from graphagentservice.common.logging import bind_log_context, context_extra, reset_log_context
 from graphagentservice.common.trace import build_trace_response_headers
 from graphagentservice.graphs.registry import GraphNotFoundError
 from graphagentservice.llm import ChatModelBuildError
@@ -42,6 +43,10 @@ from graphagentservice.services.graph_stream_service import (
     GraphStreamDispatchService,
     graph_stream_payload_from_input,
 )
+from graphagentservice.services.graph_service import GraphRequestContext
+import logging
+
+logger = logging.getLogger(__name__)
 from graphagentservice.services.plan_analyze_summary_service import (
     PlanAnalyzeSummaryService,
     PlanAnalyzeSummaryStateError,
@@ -495,8 +500,28 @@ async def _dispatch_graph_stream(
     )
     resolved_page_id = _resolve_optional_id(page_id)
     resolved_request_id = _resolve_optional_id(request_id)
+    request_context = GraphRequestContext(
+        current_user=request_context.current_user,
+        trace_id=request_context.trace_id,
+        request_headers=request_context.request_headers,
+        session_id=resolved_session_id,
+        request_id=resolved_request_id or "",
+        page_id=resolved_page_id or "",
+    )
+    token = bind_log_context(
+        traceId=request_context.trace_id,
+        graph=graph_name,
+        sessionId=resolved_session_id,
+        requestId=resolved_request_id or "-",
+        pageId=resolved_page_id or "-",
+        userId=request_context.current_user.user_id or "-",
+    )
 
     try:
+        logger.info(
+            "Graph stream dispatch requested",
+            extra=context_extra(event="graph_stream_dispatch_requested", status="started"),
+        )
         accepted = await graph_stream_dispatch_service.execute(
             graph_name=graph_name,
             payload=graph_stream_payload_from_input(payload),
@@ -506,6 +531,14 @@ async def _dispatch_graph_stream(
             request_context=request_context,
         )
     except SseConnectionNotFoundError as exc:
+        logger.warning(
+            "Graph stream dispatch failed because SSE connection is missing",
+            extra=context_extra(
+                event="graph_stream_dispatch_failed",
+                status="failed",
+                errorType=type(exc).__name__,
+            ),
+        )
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=str(exc),
@@ -513,7 +546,14 @@ async def _dispatch_graph_stream(
         ) from exc
 
     response.headers.update(trace_headers)
-    return ResultResponse(data=accepted.request_id)
+    try:
+        logger.info(
+            "Graph stream dispatch accepted",
+            extra=context_extra(event="graph_stream_dispatch_accepted", status="accepted"),
+        )
+        return ResultResponse(data=accepted.request_id)
+    finally:
+        reset_log_context(token)
 
 
 def _require_non_empty_id(
@@ -686,8 +726,28 @@ async def _dispatch_graph_resume(
     )
     resolved_page_id = _resolve_optional_id(page_id)
     resolved_request_id = _resolve_optional_id(request_id)
+    request_context = GraphRequestContext(
+        current_user=request_context.current_user,
+        trace_id=request_context.trace_id,
+        request_headers=request_context.request_headers,
+        session_id=resolved_session_id,
+        request_id=resolved_request_id or "",
+        page_id=resolved_page_id or "",
+    )
+    token = bind_log_context(
+        traceId=request_context.trace_id,
+        graph=graph_name,
+        sessionId=resolved_session_id,
+        requestId=resolved_request_id or "-",
+        pageId=resolved_page_id or "-",
+        userId=request_context.current_user.user_id or "-",
+    )
 
     try:
+        logger.info(
+            "Graph resume dispatch requested",
+            extra=context_extra(event="graph_resume_dispatch_requested", status="started"),
+        )
         accepted = await graph_stream_dispatch_service.resume(
             graph_name=graph_name,
             resume_value=resume_value,
@@ -697,6 +757,14 @@ async def _dispatch_graph_resume(
             request_context=request_context,
         )
     except SseConnectionNotFoundError as exc:
+        logger.warning(
+            "Graph resume dispatch failed because SSE connection is missing",
+            extra=context_extra(
+                event="graph_resume_dispatch_failed",
+                status="failed",
+                errorType=type(exc).__name__,
+            ),
+        )
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=str(exc),
@@ -704,4 +772,11 @@ async def _dispatch_graph_resume(
         ) from exc
 
     response.headers.update(trace_headers)
-    return ResultResponse(data=accepted.request_id)
+    try:
+        logger.info(
+            "Graph resume dispatch accepted",
+            extra=context_extra(event="graph_resume_dispatch_accepted", status="accepted"),
+        )
+        return ResultResponse(data=accepted.request_id)
+    finally:
+        reset_log_context(token)

@@ -4,6 +4,8 @@ import logging
 from collections.abc import Sequence
 from typing import Protocol, runtime_checkable
 
+from graphagentservice.common.logging import context_extra
+
 from .stream_events import StreamEvent
 
 _logger = logging.getLogger(__name__)
@@ -36,11 +38,13 @@ class InProcessStreamEventBus:
             except Exception:
                 _logger.exception(
                     "Stream event sink raised an exception; event suppressed for this sink",
-                    extra={
-                        "event_kind": event.kind,
-                        "event_id": event.event_id,
-                        "session_id": event.target.session_id,
-                    },
+                    extra=context_extra(
+                        event="stream_event_sink_failed",
+                        status="failed",
+                        event_kind=event.kind,
+                        event_id=event.event_id,
+                        session_id=event.target.session_id,
+                    ),
                 )
 
     async def publish_many(self, events: Sequence[StreamEvent]) -> None:

@@ -9,6 +9,9 @@ from langgraph.errors import GraphInterrupt
 from langgraph.prebuilt import ToolNode
 
 import logging
+import time
+
+from graphagentservice.common.logging import context_extra
 
 _logger = logging.getLogger(__name__)
 
@@ -81,19 +84,43 @@ class ObservedToolNode(ToolNode):
         messages = input.get("messages", []) if isinstance(input, dict) else []
         last = messages[-1] if messages else None
         tool_calls: list[dict[str, Any]] = list(getattr(last, "tool_calls", []))
+        started = time.perf_counter()
 
         for call in tool_calls:
+            _logger.info(
+                "Tool call started",
+                extra=context_extra(
+                    event="tool_call_started",
+                    tool=str(call.get("name", "unknown")),
+                    status="started",
+                ),
+            )
             await self._emitter.emit_start(str(call.get("name", "unknown")))
 
         try:
             result = await super().ainvoke(input, config, **kwargs)
         except GraphInterrupt:
-            # GraphInterrupt 是 interrupt() 触发的中断信号，不是工具异常
-            # 直接向上冒泡给 LangGraph 处理，不发 tool_error
-            _logger.info("Tool node interrupted (GraphInterrupt)")
+            _logger.info(
+                "Tool node interrupted",
+                extra=context_extra(
+                    event="tool_node_interrupted",
+                    status="interrupted",
+                    elapsedMs=round((time.perf_counter() - started) * 1000),
+                ),
+            )
             raise
         except Exception as exc:
             for call in tool_calls:
+                _logger.exception(
+                    "Tool call failed",
+                    extra=context_extra(
+                        event="tool_call_failed",
+                        tool=str(call.get("name", "unknown")),
+                        status="failed",
+                        elapsedMs=round((time.perf_counter() - started) * 1000),
+                        errorType=type(exc).__name__,
+                    ),
+                )
                 await self._emitter.emit_error(str(call.get("name", "unknown")), str(exc))
             raise
 
@@ -113,8 +140,26 @@ class ObservedToolNode(ToolNode):
             call_id = str(call.get("id", ""))
             name = str(call.get("name", "unknown"))
             if call_id in error_call_ids:
+                _logger.warning(
+                    "Tool call completed with error",
+                    extra=context_extra(
+                        event="tool_call_failed",
+                        tool=name,
+                        status="failed",
+                        elapsedMs=round((time.perf_counter() - started) * 1000),
+                    ),
+                )
                 await self._emitter.emit_error(name, id_to_error_text.get(call_id, "tool error"))
             else:
+                _logger.info(
+                    "Tool call completed",
+                    extra=context_extra(
+                        event="tool_call_completed",
+                        tool=name,
+                        status="completed",
+                        elapsedMs=round((time.perf_counter() - started) * 1000),
+                    ),
+                )
                 await self._emitter.emit_done(name)
 
         return result

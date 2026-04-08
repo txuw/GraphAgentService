@@ -1,13 +1,18 @@
 from __future__ import annotations
 
+import logging
+import time
 from typing import Any
 
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 from langgraph.runtime import Runtime
 
+from graphagentservice.common.logging import context_extra
 from graphagentservice.graphs.runtime import GraphRunContext
 
 from .state import ImageGraphState
+
+_logger = logging.getLogger(__name__)
 
 
 SYSTEM_PROMPT = (
@@ -26,17 +31,61 @@ class ImageAgentNodes:
         state: ImageGraphState,
         runtime: Runtime[GraphRunContext],
     ) -> ImageGraphState:
-        model = runtime.context.image_model(
-            binding=self._llm_binding,
-            tags=("multimodal",),
+        started = time.perf_counter()
+        _logger.info(
+            "Image analyze node started",
+            extra=context_extra(
+                event="graph_node_started",
+                graph=runtime.context.graph_name,
+                sessionId=runtime.context.session_id,
+                requestId=runtime.context.request_id,
+                pageId=runtime.context.page_id,
+                node="analyze",
+                status="started",
+            ),
         )
-        response = await model.ainvoke(
-            self.build_messages(
-                prompt=state.get("text", "").strip() or DEFAULT_PROMPT,
-                image_url=state["image_url"].strip(),
+        try:
+            model = runtime.context.image_model(
+                binding=self._llm_binding,
+                tags=("multimodal",),
             )
+            response = await model.ainvoke(
+                self.build_messages(
+                    prompt=state.get("text", "").strip() or DEFAULT_PROMPT,
+                    image_url=state["image_url"].strip(),
+                )
+            )
+            result = {"answer": self._content_to_text(response)}
+        except Exception as exc:
+            _logger.exception(
+                "Image analyze node failed",
+                extra=context_extra(
+                    event="graph_node_failed",
+                    graph=runtime.context.graph_name,
+                    sessionId=runtime.context.session_id,
+                    requestId=runtime.context.request_id,
+                    pageId=runtime.context.page_id,
+                    node="analyze",
+                    status="failed",
+                    elapsedMs=round((time.perf_counter() - started) * 1000),
+                    errorType=type(exc).__name__,
+                ),
+            )
+            raise
+        _logger.info(
+            "Image analyze node completed",
+            extra=context_extra(
+                event="graph_node_completed",
+                graph=runtime.context.graph_name,
+                sessionId=runtime.context.session_id,
+                requestId=runtime.context.request_id,
+                pageId=runtime.context.page_id,
+                node="analyze",
+                status="completed",
+                elapsedMs=round((time.perf_counter() - started) * 1000),
+            ),
         )
-        return {"answer": self._content_to_text(response)}
+        return result
 
     @staticmethod
     def build_messages(*, prompt: str, image_url: str) -> list[object]:

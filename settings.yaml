@@ -21,7 +21,7 @@ llm:
       base_url: null
       model: gpt-4o-mini
       temperature: 0.0
-      timeout: 60.0
+      timeout: 180.0
       max_tokens: null
       provider_options: {}
     mult_model:
@@ -30,7 +30,7 @@ llm:
       base_url: null
       model: gpt-4o-mini
       temperature: 0.1
-      timeout: 60.0
+      timeout: 180.0
       max_tokens: null
       provider_options: {}
 
@@ -89,7 +89,7 @@ memory:
   enabled: false
   llm:
     provider: openai
-    model: gpt-5-nano-2025-08-07
+    model: gpt-4.1-nano-2025-04-14
     temperature: 0.1
     max_tokens: 1500
   embedder:
@@ -112,3 +112,7 @@ memory:
 
 observability:
   log_payloads: false
+  logging:
+    format: text_kv
+    access_log: true
+    node_events: true

@@ -21,7 +21,7 @@ dependencies = [
     "python-dotenv>=1.1.1",
     "tzdata>=2025.2",
     "uvicorn[standard]>=0.41.0",
-    "mem0ai>=1.0.10",
+    "mem0ai>=1.0.11",
     "pymilvus>=2.6.11",
 ]
 
