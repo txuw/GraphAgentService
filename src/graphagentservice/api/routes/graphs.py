@@ -38,6 +38,7 @@ from graphagentservice.services.graph_service import (
     GraphPayloadValidationError,
     GraphService,
     GraphStateNotFoundError,
+    GraphStateUnrecoverableError,
 )
 from graphagentservice.services.graph_stream_service import (
     GraphStreamDispatchService,
@@ -154,6 +155,12 @@ async def invoke_plan_analyze_summary(
             headers=trace_headers,
         ) from exc
     except GraphCheckpointUnavailableError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=str(exc),
+            headers=trace_headers,
+        ) from exc
+    except GraphStateUnrecoverableError as exc:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
             detail=str(exc),

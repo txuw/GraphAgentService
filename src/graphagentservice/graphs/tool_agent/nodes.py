@@ -11,6 +11,7 @@ from langgraph.prebuilt import ToolNode
 from langgraph.runtime import Runtime
 
 from graphagentservice.common.logging import context_extra
+from graphagentservice.common.failures import GraphRecoveryState, RunStatus
 from graphagentservice.graphs.runtime import GraphRunContext
 from graphagentservice.graphs.tool_agent.prompts import SYSTEM_PROMPT
 from graphagentservice.graphs.tool_agent.state import ToolAgentGraphState
@@ -59,6 +60,10 @@ class ToolAgentNodes:
         result = {
             "query": query,
             "messages": [HumanMessage(content=query)],
+            "recovery": GraphRecoveryState(
+                run_status=RunStatus.CLEAN.value,
+                last_stable_message_count=1,
+            ).to_dict(),
         }
         _logger.info(
             "Tool agent prepare completed",
@@ -100,7 +105,11 @@ class ToolAgentNodes:
                 tags=("tool-calling",),
             )
             response = await model.ainvoke(self.build_messages(state.get("messages", [])))
-            result = {"messages": [response]}
+            recovery = GraphRecoveryState.from_mapping(state.get("recovery"))
+            if not response.tool_calls:
+                recovery.last_stable_message_count = len(state.get("messages", [])) + 1
+                recovery.run_status = RunStatus.CLEAN.value
+            result = {"messages": [response], "recovery": recovery.to_dict()}
         except Exception as exc:
             _logger.exception(
                 "Tool agent node failed",
@@ -158,6 +167,18 @@ class ToolAgentNodes:
                 payload = result
             else:
                 payload = {"messages": list(result)}
+            tool_messages = payload.get("messages", [])
+            if "__error__" in payload:
+                raise payload["__error__"]
+            recovery = GraphRecoveryState.from_mapping(payload.get("recovery") or state.get("recovery"))
+            if tool_messages:
+                recovery.last_stable_message_count = len(state.get("messages", [])) + len(tool_messages)
+                if all(
+                    isinstance(message, ToolMessage) and message.status != "error"
+                    for message in tool_messages
+                ):
+                    recovery.run_status = RunStatus.CLEAN.value
+            payload["recovery"] = recovery.to_dict()
         except Exception as exc:
             _logger.exception(
                 "Tool agent tools node failed",
@@ -202,6 +223,7 @@ class ToolAgentNodes:
         return {
             "answer": "No query provided.",
             "tools_used": [],
+            "recovery": GraphRecoveryState().to_dict(),
         }
 
     def finalize(self, state: ToolAgentGraphState) -> ToolAgentGraphState:
@@ -294,6 +316,4 @@ def _build_tool_node(
     from graphagentservice.services.tool_execution import ObservedToolNode
 
     emitter = runtime.context.tool_stream_emitter
-    if emitter is not None:
-        return ObservedToolNode(tools, emitter=emitter)
-    return ToolNode(tools)
+    return ObservedToolNode(tools, emitter=emitter)

@@ -4,6 +4,7 @@ from .graph_service import (
     GraphPayloadValidationError,
     GraphRequestContext,
     GraphService,
+    GraphStateUnrecoverableError,
     GraphStreamEvent,
 )
 from .graph_stream_service import (
@@ -40,6 +41,7 @@ __all__ = [
     "GraphPayloadValidationError",
     "GraphRequestContext",
     "GraphService",
+    "GraphStateUnrecoverableError",
     "GraphStreamAccepted",
     "GraphStreamDispatchService",
     "GraphStreamEvent",

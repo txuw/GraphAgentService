@@ -14,6 +14,7 @@ from fastapi.encoders import jsonable_encoder
 from langchain_core.messages import message_to_dict
 from pydantic import BaseModel, ValidationError
 
+from graphagentservice.common.failures import GraphRecoveryState, RunStatus
 from graphagentservice.common.auth import AuthenticatedUser
 from graphagentservice.common.logging import context_extra, summarize_mapping_keys
 from graphagentservice.common.trace import TRACE_ID_HEADER, resolve_request_trace_context
@@ -21,6 +22,7 @@ from graphagentservice.graphs.registry import GraphRegistry
 from graphagentservice.graphs.runtime import GraphRunContext, GraphRuntime, ToolEventEmitterProtocol
 from graphagentservice.llm.router import LLMRouter
 from graphagentservice.mcp import MCPToolResolver
+from graphagentservice.services.state_repair import StateRepairService
 
 _logger = logging.getLogger(__name__)
 
@@ -63,6 +65,13 @@ class GraphCheckpointUnavailableError(RuntimeError):
 class GraphStateNotFoundError(LookupError):
     def __init__(self, *, graph_name: str, session_id: str) -> None:
         super().__init__(f"No checkpoint state found for graph={graph_name} session_id={session_id}")
+        self.graph_name = graph_name
+        self.session_id = session_id
+
+
+class GraphStateUnrecoverableError(RuntimeError):
+    def __init__(self, *, graph_name: str, session_id: str) -> None:
+        super().__init__(f"Checkpoint state is unrecoverable for graph={graph_name} session_id={session_id}")
         self.graph_name = graph_name
         self.session_id = session_id
 
@@ -128,6 +137,7 @@ class GraphService:
         self._checkpoint_namespace_prefix = checkpoint_namespace_prefix.strip()
         self._memory_provider = memory_provider
         self._session_execution_coordinator = _SessionExecutionCoordinator()
+        self._state_repair_service = StateRepairService()
 
     def list_graphs(self) -> tuple[GraphRuntime, ...]:
         return self._registry.list_runtimes()
@@ -165,6 +175,7 @@ class GraphService:
             session_id=resolved_session_id,
         ):
             try:
+                await self._repair_state_if_needed(runtime=runtime, session_id=resolved_session_id)
                 state = await runtime.graph.ainvoke(
                     graph_input.model_dump(),
                     config=self._build_graph_config(
@@ -258,6 +269,7 @@ class GraphService:
             session_id=resolved_session_id,
         ):
             try:
+                await self._repair_state_if_needed(runtime=runtime, session_id=resolved_session_id)
                 yield GraphStreamEvent(
                     event="session",
                     data={"graph_name": graph_name, "session_id": resolved_session_id},
@@ -350,6 +362,7 @@ class GraphService:
             graph_name=runtime.name,
             session_id=resolved_session_id,
         ):
+            await self._repair_state_if_needed(runtime=runtime, session_id=resolved_session_id)
             yield GraphStreamEvent(
                 event="session",
                 data={"graph_name": graph_name, "session_id": resolved_session_id},
@@ -433,6 +446,43 @@ class GraphService:
                 session_id=resolved_session_id,
             )
         return {str(key): value for key, value in values.items()}
+
+    async def _repair_state_if_needed(
+        self,
+        *,
+        runtime: GraphRuntime,
+        session_id: str,
+    ) -> None:
+        config = self._build_graph_config(runtime=runtime, session_id=session_id)
+        try:
+            snapshot = await runtime.graph.aget_state(config)
+        except ValueError:
+            return
+
+        values = snapshot.values if isinstance(snapshot.values, dict) else {}
+        if not values:
+            return
+        recovery = GraphRecoveryState.from_mapping(values.get("recovery"))
+        if recovery.run_status == RunStatus.CLEAN.value:
+            return
+        if recovery.run_status == RunStatus.UNRECOVERABLE_FAILED.value:
+            raise GraphStateUnrecoverableError(
+                graph_name=runtime.name,
+                session_id=session_id,
+            )
+        repaired = self._state_repair_service.repair(
+            messages=values.get("messages", []),
+            recovery=recovery,
+            failure=None,
+        )
+        await runtime.graph.aupdate_state(
+            config,
+            {
+                "messages": repaired.messages,
+                "recovery": repaired.recovery.to_dict(),
+            },
+            as_node="state_repair",
+        )
 
     @staticmethod
     def _resolve_session_id(*, session_id: str | None, payload: dict[str, object]) -> str:

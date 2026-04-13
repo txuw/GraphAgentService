@@ -14,6 +14,7 @@ class PlanAnalyzeGraphInput(TypedDict):
 class PlanAnalyzeGraphState(TypedDict, total=False):
     query: str
     messages: Annotated[list[AnyMessage], add_messages]
+    recovery: dict[str, object]
     plan: str
     analysis: str
     user_id: str               # Mem0 用户标识（从 AuthenticatedUser 解析）

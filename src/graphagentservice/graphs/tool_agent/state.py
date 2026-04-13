@@ -16,6 +16,7 @@ class ToolAgentGraphInput(TypedDict):
 class ToolAgentGraphState(TypedDict, total=False):
     query: str
     messages: Annotated[list[AnyMessage], add_messages]
+    recovery: dict[str, object]
     answer: str
     tools_used: list[ToolCallTrace]
 

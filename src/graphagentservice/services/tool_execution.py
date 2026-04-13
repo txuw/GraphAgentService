@@ -12,6 +12,9 @@ import logging
 import time
 
 from graphagentservice.common.logging import context_extra
+from graphagentservice.common.failures import FailureContext, GraphRecoveryState
+from graphagentservice.services.failure_classifier import FailureClassifier
+from graphagentservice.services.state_repair import build_error_tool_message
 
 _logger = logging.getLogger(__name__)
 
@@ -75,13 +78,19 @@ class ObservedToolNode(ToolNode):
         self,
         tools: Sequence[BaseTool],
         *,
-        emitter: ToolStreamEventEmitter,
+        emitter: ToolStreamEventEmitter | None = None,
     ) -> None:
         super().__init__(list(tools))
         self._emitter = emitter
+        self._failure_classifier = FailureClassifier()
 
     async def ainvoke(self, input: Any, config: Any = None, **kwargs: Any) -> Any:
         messages = input.get("messages", []) if isinstance(input, dict) else []
+        state_recovery = (
+            GraphRecoveryState.from_mapping(input.get("recovery"))
+            if isinstance(input, dict)
+            else GraphRecoveryState()
+        )
         last = messages[-1] if messages else None
         tool_calls: list[dict[str, Any]] = list(getattr(last, "tool_calls", []))
         started = time.perf_counter()
@@ -95,7 +104,8 @@ class ObservedToolNode(ToolNode):
                     status="started",
                 ),
             )
-            await self._emitter.emit_start(str(call.get("name", "unknown")))
+            if self._emitter is not None:
+                await self._emitter.emit_start(str(call.get("name", "unknown")))
 
         try:
             result = await super().ainvoke(input, config, **kwargs)
@@ -110,6 +120,17 @@ class ObservedToolNode(ToolNode):
             )
             raise
         except Exception as exc:
+            primary_call = tool_calls[0] if tool_calls else {}
+            decision = self._failure_classifier.classify(
+                exc,
+                node="tools",
+                messages=messages,
+                context=FailureContext(
+                    node="tools",
+                    tool_name=str(primary_call.get("name", "")),
+                    tool_call_id=str(primary_call.get("id", "")),
+                ),
+            )
             for call in tool_calls:
                 _logger.exception(
                     "Tool call failed",
@@ -121,8 +142,27 @@ class ObservedToolNode(ToolNode):
                         errorType=type(exc).__name__,
                     ),
                 )
-                await self._emitter.emit_error(str(call.get("name", "unknown")), str(exc))
-            raise
+                if self._emitter is not None:
+                    await self._emitter.emit_error(str(call.get("name", "unknown")), str(exc))
+            state_recovery.with_failure(decision, node="tools")
+            if decision.recoverable and decision.action.value == "write_tool_error_message":
+                error_messages = [
+                    build_error_tool_message(
+                        tool_call_id=str(call.get("id", "")),
+                        tool_name=str(call.get("name", "")),
+                        decision=decision,
+                    )
+                    for call in tool_calls
+                    if str(call.get("id", ""))
+                ]
+                return {
+                    "messages": error_messages,
+                    "recovery": state_recovery.to_dict(),
+                }
+            return {
+                "recovery": state_recovery.to_dict(),
+                "__error__": exc,
+            }
 
         output_messages = result.get("messages", []) if isinstance(result, dict) else []
         error_call_ids: set[str] = {
@@ -149,7 +189,8 @@ class ObservedToolNode(ToolNode):
                         elapsedMs=round((time.perf_counter() - started) * 1000),
                     ),
                 )
-                await self._emitter.emit_error(name, id_to_error_text.get(call_id, "tool error"))
+                if self._emitter is not None:
+                    await self._emitter.emit_error(name, id_to_error_text.get(call_id, "tool error"))
             else:
                 _logger.info(
                     "Tool call completed",
@@ -160,7 +201,8 @@ class ObservedToolNode(ToolNode):
                         elapsedMs=round((time.perf_counter() - started) * 1000),
                     ),
                 )
-                await self._emitter.emit_done(name)
+                if self._emitter is not None:
+                    await self._emitter.emit_done(name)
 
         return result
 

@@ -16,13 +16,14 @@ import time
 from collections.abc import Sequence
 from typing import Any
 
-from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
+from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
 from langchain_core.tools import BaseTool
 from langgraph.prebuilt import ToolNode, tools_condition
 from langgraph.runtime import Runtime
 
 from graphagentservice.graphs.runtime import GraphRunContext
 from graphagentservice.common.logging import context_extra
+from graphagentservice.common.failures import GraphRecoveryState, RunStatus
 
 from .prompts import ANALYSIS_PROMPT_TEMPLATE, SYSTEM_ANALYSIS_PROMPT
 from .state import PlanAnalyzeGraphState
@@ -201,6 +202,7 @@ class PlanAnalyzeNodes:
                 "plan": "",
                 "analysis": "No query provided.",
                 "messages": [],
+                "recovery": GraphRecoveryState().to_dict(),
             }
             _logger.info(
                 "Plan analyze node completed",
@@ -248,8 +250,12 @@ class PlanAnalyzeNodes:
                 "plan": state.get("plan", ""),
                 "messages": [response],
             }
+            recovery = GraphRecoveryState.from_mapping(state.get("recovery"))
             if not response.tool_calls:
                 result["analysis"] = self._content_to_text(response)
+                recovery.last_stable_message_count = len(state.get("messages", [])) + 1
+                recovery.run_status = RunStatus.CLEAN.value
+            result["recovery"] = recovery.to_dict()
         except Exception as exc:
             _logger.exception(
                 "Plan analyze node failed",
@@ -309,6 +315,18 @@ class PlanAnalyzeNodes:
             tool_node = _build_tool_node(resolved_tools, runtime)
             result = await tool_node.ainvoke(state, runtime=runtime)
             payload = result if isinstance(result, dict) else {"messages": list(result)}
+            if "__error__" in payload:
+                raise payload["__error__"]
+            tool_messages = payload.get("messages", [])
+            recovery = GraphRecoveryState.from_mapping(payload.get("recovery") or state.get("recovery"))
+            if tool_messages:
+                recovery.last_stable_message_count = len(state.get("messages", [])) + len(tool_messages)
+                if all(
+                    isinstance(message, ToolMessage) and message.status != "error"
+                    for message in tool_messages
+                ):
+                    recovery.run_status = RunStatus.CLEAN.value
+            payload["recovery"] = recovery.to_dict()
         except Exception as exc:
             _logger.exception(
                 "Plan analyze tools node failed",
@@ -575,6 +593,4 @@ def _build_tool_node(
     from graphagentservice.services.tool_execution import ObservedToolNode
 
     emitter = runtime.context.tool_stream_emitter
-    if emitter is not None:
-        return ObservedToolNode(tools, emitter=emitter)
-    return ToolNode(tools)
+    return ObservedToolNode(tools, emitter=emitter)
