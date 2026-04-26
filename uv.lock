@@ -331,6 +331,7 @@ dependencies = [
 dev = [
     { name = "httpx" },
     { name = "pytest" },
+    { name = "websockets" },
 ]
 
 [package.metadata]
@@ -353,6 +354,7 @@ requires-dist = [
 dev = [
     { name = "httpx", specifier = ">=0.28.1" },
     { name = "pytest", specifier = ">=9.0.2" },
+    { name = "websockets", specifier = ">=16.0" },
 ]
 
 [[package]]

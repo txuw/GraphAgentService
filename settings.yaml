@@ -81,6 +81,9 @@ graphs:
   image-analyze-calories:
     llm_bindings:
       analysis: multimodal
+  body-report-analyze:
+    llm_bindings:
+      analysis: multimodal
   tool-agent:
     llm_bindings:
       agent: tool_calling

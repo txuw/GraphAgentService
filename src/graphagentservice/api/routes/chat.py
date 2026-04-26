@@ -17,6 +17,7 @@ from graphagentservice.common.trace import build_trace_response_headers
 
 _logger = logging.getLogger(__name__)
 from graphagentservice.schemas.api import (
+    BodyReportChatExecuteRequest,
     ChatExecuteRequest,
     ChatExecuteRequestBase,
     ChatExecuteResponse,
@@ -39,6 +40,7 @@ PLAN_ANALYZE_GRAPH = "plan-analyze"
 TOOL_AGENT_GRAPH = "tool-agent"
 IMAGE_AGENT_GRAPH = "image-agent"
 IMAGE_ANALYZE_CALORIES_GRAPH = "image-analyze-calories"
+BODY_REPORT_ANALYZE_GRAPH = "body-report-analyze"
 
 
 @router.get("/sse/connect")
@@ -181,6 +183,26 @@ async def execute_image_analyze_calories_chat(
         request=request,
         response=response,
         graph_name=IMAGE_ANALYZE_CALORIES_GRAPH,
+        body=body,
+        chat_stream_service=chat_stream_service,
+    )
+
+
+@router.post(
+    "/chat/body-report-analyze/execute",
+    response_model=ChatExecuteResponse,
+    operation_id="executeBodyReportAnalyzeChat",
+)
+async def execute_body_report_analyze_chat(
+    request: Request,
+    response: Response,
+    body: BodyReportChatExecuteRequest,
+    chat_stream_service: ChatStreamService = Depends(get_chat_stream_service),
+) -> ChatExecuteResponse:
+    return await _execute_chat(
+        request=request,
+        response=response,
+        graph_name=BODY_REPORT_ANALYZE_GRAPH,
         body=body,
         chat_stream_service=chat_stream_service,
     )

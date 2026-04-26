@@ -1,4 +1,5 @@
 from .analysis import StructuredTextAnalysis, TextAnalysisOutput, TextAnalysisRequest
+from .body_report import BodyReportInfo, BodyReportOutput, BodyReportRequest
 from .api import (
     AgentStreamEvent,
     ChatExecuteRequest,
@@ -15,6 +16,9 @@ from .plan_summary import DayPlan, Overview, PlanAnalyzeSummaryOutput, PlanSumma
 from .tool_agent import ToolAgentOutput, ToolAgentRequest, ToolCallTrace
 
 __all__ = [
+    "BodyReportInfo",
+    "BodyReportOutput",
+    "BodyReportRequest",
     "CalorieInfo",
     "DayPlan",
     "AgentStreamEvent",

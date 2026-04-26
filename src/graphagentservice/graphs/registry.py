@@ -12,6 +12,7 @@ from .text_analysis import TextAnalysisGraphBuilder
 from .tool_agent import ToolAgentGraphBuilder
 from .image_agent import ImageGraphBuilder
 from .image_analyze_calories import ImageAnalyzeCaloriesGraphBuilder
+from .body_report_analyze import BodyReportAnalyzeGraphBuilder
 
 
 class GraphNotFoundError(KeyError):
@@ -60,6 +61,10 @@ def create_graph_registry(
         ).build(),
         ImageAnalyzeCaloriesGraphBuilder(
             graph_settings=graph_overrides.get(ImageAnalyzeCaloriesGraphBuilder.name, {}),
+            checkpointer=checkpointer,
+        ).build(),
+        BodyReportAnalyzeGraphBuilder(
+            graph_settings=graph_overrides.get(BodyReportAnalyzeGraphBuilder.name, {}),
             checkpointer=checkpointer,
         ).build(),
     )

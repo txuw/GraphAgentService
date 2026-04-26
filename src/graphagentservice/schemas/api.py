@@ -5,6 +5,7 @@ from typing import Any, Generic, TypeVar
 from pydantic import AliasChoices, BaseModel, ConfigDict, Field
 
 from graphagentservice.schemas.analysis import TextAnalysisOutput
+from graphagentservice.schemas.body_report import BodyReportOutput
 from graphagentservice.schemas.image import ImageAgentOutput
 from graphagentservice.schemas.image_calories import ImageCaloriesOutput
 from graphagentservice.schemas.plan_analyze import PlanAnalyzeOutput
@@ -163,6 +164,18 @@ class ImageCaloriesGraphRequest(GraphRequestEnvelope):
     )
 
 
+class BodyReportGraphRequest(GraphRequestEnvelope):
+    text: str = Field(
+        default="",
+        validation_alias=AliasChoices("text", "message", "description"),
+    )
+    image_url: str = Field(
+        min_length=1,
+        validation_alias=AliasChoices("image_url", "imageUrl"),
+        serialization_alias="imageUrl",
+    )
+
+
 class ChatExecuteRequest(BaseModel):
     model_config = ConfigDict(populate_by_name=True)
 
@@ -262,6 +275,30 @@ class ImageCaloriesChatExecuteRequest(ChatExecuteRequestBase):
     def graph_payload(self) -> dict[str, Any]:
         return {"text": self.text, "image_url": self.image_url}
 
+class BodyReportChatExecuteRequest(ChatExecuteRequestBase):
+    text: str = Field(
+        default="",
+        validation_alias=AliasChoices("text", "message", "description"),
+    )
+    image_url: str = Field(
+        min_length=1,
+        validation_alias=AliasChoices("image_url", "imageUrl"),
+        serialization_alias="imageUrl",
+    )
+
+    def graph_payload(self) -> dict[str, Any]:
+        return {"text": self.text, "image_url": self.image_url}
+
+
+class GraphResumeRequest(BaseModel):
+    """Resume 请求 — 中断后用户提交答案。"""
+    model_config = ConfigDict(populate_by_name=True)
+
+    answers: dict[str, str] = Field(
+        description="问题答案映射，key 为问题文本或 question_id，value 为用户选择",
+        validation_alias=AliasChoices("answers", "resumeValue"),
+    )
+
 
 GraphInvokeResult = ResultResponse[dict[str, Any]]
 TextAnalysisInvokeResult = ResultResponse[TextAnalysisOutput]
@@ -270,3 +307,4 @@ PlanAnalyzeSummaryInvokeResult = ResultResponse[PlanAnalyzeSummaryOutput]
 ToolAgentInvokeResult = ResultResponse[ToolAgentOutput]
 ImageAgentInvokeResult = ResultResponse[ImageAgentOutput]
 ImageCaloriesInvokeResult = ResultResponse[ImageCaloriesOutput]
+BodyReportInvokeResult = ResultResponse[BodyReportOutput]

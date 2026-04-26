@@ -20,6 +20,8 @@ from graphagentservice.graphs.registry import GraphNotFoundError
 from graphagentservice.llm import ChatModelBuildError
 from graphagentservice.mcp import MCPConfigurationError, MCPToolResolutionError
 from graphagentservice.schemas.api import (
+    BodyReportGraphRequest,
+    BodyReportInvokeResult,
     GraphDescriptorResponse,
     GraphInvokeResult,
     ImageAgentGraphRequest,
@@ -59,6 +61,7 @@ PLAN_ANALYZE_GRAPH = "plan-analyze"
 TOOL_AGENT_GRAPH = "tool-agent"
 IMAGE_AGENT_GRAPH = "image-agent"
 IMAGE_ANALYZE_CALORIES_GRAPH = "image-analyze-calories"
+BODY_REPORT_ANALYZE_GRAPH = "body-report-analyze"
 
 
 @router.get("/graphs", response_model=list[GraphDescriptorResponse])
@@ -242,6 +245,28 @@ async def invoke_image_analyze_calories_graph(
 
 
 @router.post(
+    "/graphs/body-report-analyze/invoke",
+    response_model=BodyReportInvokeResult,
+    operation_id="invokeBodyReportAnalyzeGraph",
+)
+async def invoke_body_report_analyze_graph(
+    request: Request,
+    response: Response,
+    body: BodyReportGraphRequest,
+    session_id: str | None = Query(default=None, alias="sessionId"),
+    graph_service: GraphService = Depends(get_graph_service),
+) -> ResultResponse[dict[str, Any]]:
+    return await _invoke_graph(
+        request=request,
+        response=response,
+        graph_name=BODY_REPORT_ANALYZE_GRAPH,
+        payload=body.graph_payload(),
+        session_id=_resolve_identifier(body.session_id, session_id),
+        graph_service=graph_service,
+    )
+
+
+@router.post(
     "/graphs/text-analysis/stream",
     response_model=ResultResponse[str],
     operation_id="streamTextAnalysisGraph",
@@ -373,6 +398,34 @@ async def stream_image_analyze_calories_graph(
         request=request,
         response=response,
         graph_name=IMAGE_ANALYZE_CALORIES_GRAPH,
+        payload=body.graph_payload(),
+        session_id=_resolve_identifier(body.session_id, session_id),
+        page_id=_resolve_identifier(body.page_id, page_id),
+        request_id=_resolve_identifier(body.request_id, request_id),
+        graph_stream_dispatch_service=graph_stream_dispatch_service,
+    )
+
+
+@router.post(
+    "/graphs/body-report-analyze/stream",
+    response_model=ResultResponse[str],
+    operation_id="streamBodyReportAnalyzeGraph",
+)
+async def stream_body_report_analyze_graph(
+    request: Request,
+    response: Response,
+    body: BodyReportGraphRequest,
+    session_id: str | None = Query(default=None, alias="sessionId"),
+    page_id: str | None = Query(default=None, alias="pageId"),
+    request_id: str | None = Query(default=None, alias="requestId"),
+    graph_stream_dispatch_service: GraphStreamDispatchService = Depends(
+        get_graph_stream_dispatch_service
+    ),
+) -> ResultResponse[str]:
+    return await _dispatch_graph_stream(
+        request=request,
+        response=response,
+        graph_name=BODY_REPORT_ANALYZE_GRAPH,
         payload=body.graph_payload(),
         session_id=_resolve_identifier(body.session_id, session_id),
         page_id=_resolve_identifier(body.page_id, page_id),
@@ -604,7 +657,11 @@ def _normalize_graph_payload(
         _apply_first_alias(normalized, target="text", aliases=("message",))
     elif graph_name in {PLAN_ANALYZE_GRAPH, TOOL_AGENT_GRAPH}:
         _apply_first_alias(normalized, target="query", aliases=("message",))
-    elif graph_name in {IMAGE_AGENT_GRAPH, IMAGE_ANALYZE_CALORIES_GRAPH}:
+    elif graph_name in {
+        IMAGE_AGENT_GRAPH,
+        IMAGE_ANALYZE_CALORIES_GRAPH,
+        BODY_REPORT_ANALYZE_GRAPH,
+    }:
         _apply_first_alias(normalized, target="image_url", aliases=("imageUrl",))
         _apply_first_alias(
             normalized,

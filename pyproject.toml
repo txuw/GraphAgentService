@@ -30,6 +30,7 @@ graphagentservice = "graphagentservice.__main__:main"
 dev = [
     "httpx>=0.28.1",
     "pytest>=9.0.2",
+    "websockets>=16.0",
 ]
 
 [tool.hatch.build.targets.wheel]
