@@ -11,6 +11,12 @@ from .graph_stream_service import (
     GraphStreamDispatchService,
     graph_stream_payload_from_input,
 )
+from .image_input import (
+    ImageFetchError,
+    ImageFetchSettings,
+    ImageInputProcessor,
+    ProcessedImage,
+)
 from .plan_analyze_summary_service import (
     PlanAnalyzeSummaryService,
     PlanAnalyzeSummaryStateError,
@@ -43,11 +49,15 @@ __all__ = [
     "GraphStreamAccepted",
     "GraphStreamDispatchService",
     "GraphStreamEvent",
+    "ImageFetchError",
+    "ImageFetchSettings",
+    "ImageInputProcessor",
     "InProcessStreamEventBus",
     "LangGraphStreamAdapter",
     "ObservedToolNode",
     "PlanAnalyzeSummaryService",
     "PlanAnalyzeSummaryStateError",
+    "ProcessedImage",
     "SseConnection",
     "SseConnectionNotFoundError",
     "SseConnectionRegistry",

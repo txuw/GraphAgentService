@@ -44,6 +44,7 @@ from graphagentservice.services.graph_service import (
     GraphService,
     GraphStateNotFoundError,
 )
+from graphagentservice.services.image_input import ImageFetchError
 from graphagentservice.services.graph_stream_service import (
     GraphStreamDispatchService,
     graph_stream_payload_from_input,
@@ -527,6 +528,17 @@ async def _invoke_graph(
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
             detail=exc.errors,
+            headers=trace_headers,
+        ) from exc
+    except ImageFetchError as exc:
+        _logger.warning(
+            "Graph invoke rejected - image fetch invalid  graph=%s  error=%s",
+            graph_name,
+            exc,
+        )
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail=str(exc),
             headers=trace_headers,
         ) from exc
     except (ChatModelBuildError, MCPConfigurationError, MCPToolResolutionError) as exc:

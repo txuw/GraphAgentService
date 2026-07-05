@@ -19,6 +19,7 @@ from graphagentservice.graphs.registry import GraphRegistry
 from graphagentservice.graphs.runtime import GraphRunContext, GraphRuntime, ToolEventEmitterProtocol
 from graphagentservice.llm.router import LLMRouter
 from graphagentservice.mcp import MCPToolResolver
+from graphagentservice.services.image_input import ImageInputProcessor
 
 _logger = logging.getLogger(__name__)
 
@@ -115,12 +116,14 @@ class GraphService:
         llm_router: LLMRouter,
         mcp_tool_resolver: MCPToolResolver | None = None,
         checkpoint_namespace_prefix: str = "",
+        image_input_processor: ImageInputProcessor | None = None,
     ) -> None:
         self._registry = registry
         self._llm_router = llm_router
         self._mcp_tool_resolver = mcp_tool_resolver
         self._checkpoint_namespace_prefix = checkpoint_namespace_prefix.strip()
         self._session_execution_coordinator = _SessionExecutionCoordinator()
+        self._image_input_processor = image_input_processor
 
     def list_graphs(self) -> tuple[GraphRuntime, ...]:
         return self._registry.list_runtimes()
@@ -134,6 +137,10 @@ class GraphService:
     ) -> GraphInvocationResult:
         runtime = self._registry.get(graph_name)
         payload_dict = self._payload_to_dict(payload)
+        payload_dict = await self._process_image_input(
+            runtime=runtime,
+            payload=payload_dict,
+        )
         graph_input = self._validate_payload(runtime, payload_dict)
         resolved_session_id = self._resolve_session_id(session_id=session_id, payload=payload_dict)
         thread_id = self._build_thread_id(graph_name=runtime.name, session_id=resolved_session_id)
@@ -203,6 +210,10 @@ class GraphService:
     ) -> AsyncIterator[GraphStreamEvent]:
         runtime = self._registry.get(graph_name)
         payload_dict = self._payload_to_dict(payload)
+        payload_dict = await self._process_image_input(
+            runtime=runtime,
+            payload=payload_dict,
+        )
         graph_input = self._validate_payload(runtime, payload_dict)
         resolved_session_id = self._resolve_session_id(session_id=session_id, payload=payload_dict)
         thread_id = self._build_thread_id(graph_name=runtime.name, session_id=resolved_session_id)
@@ -369,6 +380,19 @@ class GraphService:
         if not self._checkpoint_namespace_prefix:
             return graph_name
         return f"{self._checkpoint_namespace_prefix}:{graph_name}"
+
+    async def _process_image_input(
+        self,
+        *,
+        runtime: GraphRuntime,
+        payload: dict[str, object],
+    ) -> dict[str, object]:
+        if self._image_input_processor is None:
+            return payload
+        return await self._image_input_processor.process_graph_payload(
+            graph_name=runtime.name,
+            payload=payload,
+        )
 
     @staticmethod
     def _validate_payload(runtime: GraphRuntime, payload: dict[str, object]) -> BaseModel:

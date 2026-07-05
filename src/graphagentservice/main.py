@@ -12,6 +12,8 @@ from graphagentservice.services import (
     ChatStreamService,
     GraphService,
     GraphStreamDispatchService,
+    ImageFetchSettings,
+    ImageInputProcessor,
     InProcessStreamEventBus,
     PlanAnalyzeSummaryService,
     SseConnectionRegistry,
@@ -26,6 +28,9 @@ def create_app() -> FastAPI:
     logto_authenticator = LogtoAuthenticator(settings.get("logto", {}))
     mcp_settings = MCPSettings.model_validate(settings.get("mcp", {}))
     mcp_tool_resolver = MCPToolResolver(mcp_settings)
+    image_input_processor = ImageInputProcessor(
+        ImageFetchSettings.from_settings(settings.get("image_fetch", {}))
+    )
     sse_connection_registry = SseConnectionRegistry()
 
     stream_event_bus = InProcessStreamEventBus()
@@ -42,6 +47,7 @@ def create_app() -> FastAPI:
             llm_router,
             mcp_tool_resolver=mcp_tool_resolver,
             checkpoint_namespace_prefix=str(settings.app.name),
+            image_input_processor=image_input_processor,
         )
         app.state.graph_service = graph_service
         graph_stream_dispatch_service = GraphStreamDispatchService(

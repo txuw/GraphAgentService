@@ -19,6 +19,7 @@ from .graph_service import (
     GraphRequestContext,
     GraphService,
 )
+from .image_input import ImageFetchError
 from .stream_event_bus import InProcessStreamEventBus
 from .stream_events import LangGraphStreamAdapter, StreamEventFactory, StreamEventSequence, StreamEventTarget
 from .tool_execution import ToolStreamEventEmitter
@@ -219,6 +220,8 @@ def _error_code(exc: Exception) -> str:
         return "GRAPH_NOT_FOUND"
     if isinstance(exc, GraphPayloadValidationError):
         return "INVALID_PAYLOAD"
+    if isinstance(exc, ImageFetchError):
+        return "IMAGE_FETCH_ERROR"
     if isinstance(exc, ChatModelBuildError):
         return "MODEL_BUILD_ERROR"
     if isinstance(exc, (MCPConfigurationError, MCPToolResolutionError)):
@@ -233,7 +236,7 @@ def _error_message(exc: Exception) -> str:
 
 
 def _is_retriable(exc: Exception) -> bool:
-    return not isinstance(exc, GraphPayloadValidationError)
+    return not isinstance(exc, (GraphPayloadValidationError, ImageFetchError))
 
 
 def graph_stream_payload_from_input(payload: dict[str, Any] | Any) -> dict[str, Any]:

@@ -188,17 +188,51 @@ def build_log_config(log_level: str = "INFO") -> dict[str, Any]:
 def fmt_payload(data: object, max_chars: int = 800) -> str:
     """Serialize *data* to a truncated JSON string suitable for log output.
 
-    Truncation prevents large base64 image payloads from flooding logs.
+    Image URLs and data URLs are redacted before truncation to avoid leaking CDN
+    signatures or base64 payloads.
     """
     import json as _json
 
     try:
-        text = _json.dumps(data, ensure_ascii=False, default=str)
+        text = _json.dumps(_redact_log_payload(data), ensure_ascii=False, default=str)
     except Exception:
         text = repr(data)
     if len(text) <= max_chars:
         return text
     return text[:max_chars] + f" ...[+{len(text) - max_chars} chars]"
+
+
+def _redact_log_payload(data: object) -> object:
+    if isinstance(data, dict):
+        redacted: dict[object, object] = {}
+        for key, value in data.items():
+            if str(key) in {"image_url", "imageUrl"} and isinstance(value, str):
+                redacted[key] = _redact_image_reference(value)
+            else:
+                redacted[key] = _redact_log_payload(value)
+        return redacted
+    if isinstance(data, list):
+        return [_redact_log_payload(item) for item in data]
+    if isinstance(data, tuple):
+        return tuple(_redact_log_payload(item) for item in data)
+    return data
+
+
+def _redact_image_reference(value: str) -> str:
+    candidate = value.strip()
+    if candidate.lower().startswith("data:image/"):
+        prefix = candidate.split(",", 1)[0]
+        return f"{prefix},<redacted>"
+    if candidate.startswith(("http://", "https://")):
+        try:
+            from urllib.parse import urlparse
+
+            parsed = urlparse(candidate)
+            host = parsed.hostname or "unknown"
+            return f"{parsed.scheme}://{host}/<redacted>"
+        except Exception:
+            return "<redacted-image-url>"
+    return "<redacted-image-reference>"
 
 
 def log_payload(logger: logging.Logger, label: str, data: object) -> None:

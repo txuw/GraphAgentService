@@ -11,11 +11,13 @@ requires-python = ">=3.11"
 dependencies = [
     "dynaconf>=3.2.12",
     "fastapi>=0.135.1",
+    "httpx>=0.28.1",
     "langchain-mcp-adapters>=0.1.0",
     "langgraph>=0.6.6",
     "langgraph-checkpoint-postgres>=2.0.24",
     "langchain-openai>=1.0.0",
     "openai>=1.68.2",
+    "pillow>=11.0.0",
     "psycopg[binary]>=3.2.10",
     "pyjwt[crypto]>=2.10.1",
     "python-dotenv>=1.1.1",
@@ -28,7 +30,6 @@ graphagentservice = "graphagentservice.__main__:main"
 
 [dependency-groups]
 dev = [
-    "httpx>=0.28.1",
     "pytest>=9.0.2",
     "websockets>=16.0",
 ]
