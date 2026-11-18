@@ -73,7 +73,8 @@ jobs:
         with:
           context: .
           file: ./Dockerfile
-          push: true
+          # ACR accepts provenance in the image manifest format.
+          outputs: type=registry,oci-artifact=false
           platforms: linux/amd64
           tags: ${{ env.ACR_DOMAIN }}/${{ env.ACR_ZONE }}/${{ env.APP_NAME }}:${{ steps.image_tag.outputs.image_tag }}
 
