@@ -5,7 +5,7 @@ import logging
 from dataclasses import dataclass
 from io import BytesIO
 from typing import Any
-from urllib.parse import urlparse
+from urllib.parse import ParseResult, urlparse
 
 import httpx
 from PIL import Image, UnidentifiedImageError
@@ -40,6 +40,7 @@ class ImageFetchSettings:
     allowed_mime_types: frozenset[str] = frozenset(
         {"image/jpeg", "image/png", "image/webp"}
     )
+    url_passthrough_graphs: frozenset[str] = frozenset()
 
     @classmethod
     def from_settings(cls, settings: Any) -> ImageFetchSettings:
@@ -47,6 +48,9 @@ class ImageFetchSettings:
         return cls(
             enabled=bool(_read(raw, "enabled", default=False)),
             graphs=frozenset(_read_string_list(raw, "graphs")),
+            url_passthrough_graphs=frozenset(
+                _read_string_list(raw, "url_passthrough_graphs")
+            ),
             allowed_hosts=frozenset(
                 host.lower() for host in _read_string_list(raw, "allowed_hosts")
             ),
@@ -95,10 +99,17 @@ class ImageInputProcessor:
         if not isinstance(raw_image_url, str) or not raw_image_url.strip():
             return payload
 
-        processed = await self.process_image_url(raw_image_url.strip(), graph_name=graph_name)
-        next_payload = dict(payload)
-        next_payload["image_url"] = processed.data_url
-        return next_payload
+        image_url = raw_image_url.strip()
+        if graph_name in self._settings.url_passthrough_graphs and not _is_data_image_url(image_url):
+            parsed, host = self._validate_remote_image_url(image_url)
+            if parsed.scheme == "https":
+                authority = f"[{host}]" if ":" in host else host
+                if parsed.netloc.lower() not in {authority, f"{authority}:443"}:
+                    raise ImageFetchError("image_url must use the allowed HTTPS origin")
+                return {**payload, "image_url": image_url}
+
+        processed = await self.process_image_url(image_url, graph_name=graph_name)
+        return {**payload, "image_url": processed.data_url}
 
     async def process_image_url(self, image_url: str, *, graph_name: str) -> ProcessedImage:
         if _is_data_image_url(image_url):
@@ -110,17 +121,7 @@ class ImageInputProcessor:
                 height=0,
             )
 
-        parsed = urlparse(image_url)
-        if parsed.scheme not in {"http", "https"}:
-            raise ImageFetchError("image_url must be an http(s) URL or image data URL")
-
-        host = (parsed.hostname or "").lower()
-        if not host or host not in self._settings.allowed_hosts:
-            raise ImageFetchError("image_url host is not allowed")
-
-        if not self._settings.allowed_hosts:
-            raise ImageFetchError("image_fetch.allowed_hosts must not be empty")
-
+        _, host = self._validate_remote_image_url(image_url)
         data, content_type = await self._download_image(image_url, host=host)
         actual_mime, width, height = self._validate_image(data, content_type)
         data_url = f"data:{actual_mime};base64,{base64.b64encode(data).decode('ascii')}"
@@ -140,6 +141,20 @@ class ImageInputProcessor:
             width=width,
             height=height,
         )
+
+    def _validate_remote_image_url(self, image_url: str) -> tuple[ParseResult, str]:
+        try:
+            parsed = urlparse(image_url)
+        except ValueError as exc:
+            raise ImageFetchError("image_url is invalid") from exc
+
+        if parsed.scheme not in {"http", "https"}:
+            raise ImageFetchError("image_url must be an http(s) URL or image data URL")
+
+        host = (parsed.hostname or "").lower()
+        if not host or host not in self._settings.allowed_hosts:
+            raise ImageFetchError("image_url host is not allowed")
+        return parsed, host
 
     def _should_process(self, graph_name: str) -> bool:
         return self._settings.enabled and graph_name in self._settings.graphs

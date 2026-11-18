@@ -5,6 +5,7 @@ from io import BytesIO
 from typing import Any
 
 import httpx
+import pytest
 from PIL import Image
 from pydantic import BaseModel, Field
 
@@ -81,6 +82,7 @@ def _processor(
     max_bytes: int = 10 * 1024 * 1024,
     max_pixels: int = 12_000_000,
     allowed_hosts: frozenset[str] = frozenset({"cdn.example.test"}),
+    url_passthrough_graphs: frozenset[str] = frozenset(),
 ) -> ImageInputProcessor:
     return ImageInputProcessor(
         ImageFetchSettings(
@@ -89,6 +91,7 @@ def _processor(
             allowed_hosts=allowed_hosts,
             max_bytes=max_bytes,
             max_pixels=max_pixels,
+            url_passthrough_graphs=url_passthrough_graphs,
         ),
         client=client,
     )
@@ -287,12 +290,73 @@ def test_graph_service_invoke_processes_target_graph_image_url() -> None:
     assert str(fake_graph.last_input["image_url"]).startswith("data:image/jpeg;base64,")
 
 
+@pytest.mark.parametrize("image_url", [
+    "https://cdn.example.test/image.jpg?x-oss-process=image/auto-orient,1/resize,w_1080,limit_1/quality,q_80",
+    "data:image/jpeg;base64,abc",
+])
+def test_graph_service_invoke_passes_calorie_image_without_fetch(image_url: str) -> None:
+    def unexpected_download(request: httpx.Request) -> httpx.Response:
+        pytest.fail(f"Unexpected image download: {request.url.host}")
+
+    fake_graph = _FakeGraph()
+    service = _graph_service_for(
+        graph_name="image-analyze-calories",
+        fake_graph=fake_graph,
+        processor=_processor(
+            client=httpx.AsyncClient(transport=httpx.MockTransport(unexpected_download)),
+            url_passthrough_graphs=frozenset({"image-analyze-calories"}),
+        ),
+    )
+
+    result = asyncio.run(
+        service.invoke(graph_name="image-analyze-calories", payload={"image_url": image_url})
+    )
+
+    assert result.output.image_url == image_url
+    assert fake_graph.last_input is not None
+    assert fake_graph.last_input["image_url"] == image_url
+
+
+@pytest.mark.parametrize("image_url", [
+    "https://other.example.test/image.jpg",
+    "https://user@cdn.example.test/image.jpg",
+    "https://cdn.example.test:8443/image.jpg",
+])
+def test_url_passthrough_rejects_unapproved_origin(image_url: str) -> None:
+    processor = _processor(
+        client=_client_for_response(),
+        url_passthrough_graphs=frozenset({"image-analyze-calories"}),
+    )
+
+    with pytest.raises(ImageFetchError, match="host is not allowed|allowed HTTPS origin"):
+        asyncio.run(processor.process_graph_payload(
+            graph_name="image-analyze-calories", payload={"image_url": image_url}
+        ))
+
+
+def test_url_passthrough_keeps_http_image_fetch() -> None:
+    processor = _processor(
+        client=_client_for_response(),
+        url_passthrough_graphs=frozenset({"image-analyze-calories"}),
+    )
+
+    payload = asyncio.run(processor.process_graph_payload(
+        graph_name="image-analyze-calories",
+        payload={"image_url": "http://cdn.example.test/image.jpg"},
+    ))
+
+    assert str(payload["image_url"]).startswith("data:image/jpeg;base64,")
+
+
 def test_graph_service_stream_processes_target_graph_image_url() -> None:
     fake_graph = _FakeGraph()
     service = _graph_service_for(
         graph_name="body-report-analyze",
         fake_graph=fake_graph,
-        processor=_processor(client=_client_for_response()),
+        processor=_processor(
+            client=_client_for_response(),
+            url_passthrough_graphs=frozenset({"image-analyze-calories"}),
+        ),
     )
 
     async def collect() -> list[object]:

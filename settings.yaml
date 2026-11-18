@@ -92,6 +92,8 @@ graphs:
 image_fetch:
   enabled: true
   graphs: ["body-report-analyze", "image-analyze-calories"]
+  # Send allowlisted HTTPS images to the model as URLs for these graphs.
+  url_passthrough_graphs: ["image-analyze-calories"]
   allowed_hosts: ["oss.txuw.top"]
   timeout_seconds: 10.0
   max_bytes: 10485760
